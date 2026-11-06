@@ -5,10 +5,12 @@
 import { namehash } from "viem/ens";
 import { assertValidLabel, formatUnits6, parseUnits6, type CreateAgentRequest } from "@ethernals/shared";
 import { config } from "./config";
+import { spinUpBrain } from "./brain";
 import { encryptSecret, personHash, providerKey } from "./crypto";
 import { getAgentByLabel, getAgentByEnsName, insertAgent, listAgentsOfPerson, updateAgent, type AgentRow, type PersonRow } from "./db";
 import { agentEnsName, publishAgent } from "./ens";
 import { badRequest, conflict } from "./errors";
+import { ensureSepoliaGas, registerErc8004 } from "./escrow";
 import { emit, log } from "./events";
 import { createAgentAccount, fundFromOperator } from "./hedera";
 import { registerAgentOnLedger } from "./ledger";
@@ -27,7 +29,26 @@ interface CreateOptions {
   startingUnits?: bigint;
   publishEns?: boolean;
   arenaRole?: string | null;
+  strategy?: AgentRow["strategy"];
   onStep?: (msg: string) => void;
+}
+
+/** Live spin-up steps for the /provider checklist. */
+function born(ensName: string, step: string, message: string): void {
+  emit("agent.born", { agentEnsName: ensName, step, message });
+}
+
+/** Sepolia gas and an ERC-8004 identity. A failure leaves a working agent, and the checklist shows it. */
+async function spinUpOnSepolia(agent: AgentRow): Promise<void> {
+  try {
+    await ensureSepoliaGas(agent.evm_address as `0x${string}`);
+    born(agent.ens_name, "gas", "Sepolia gas ✓");
+    const agentId = await registerErc8004(agent);
+    born(agent.ens_name, "erc8004", `ERC-8004 ✓ agent ${agentId}`);
+  } catch (err) {
+    log.error(`Sepolia spin-up failed for ${agent.ens_name}`, err);
+    born(agent.ens_name, "erc8004", `ERC-8004 ✖ ${(err as Error).message.split("\n")[0]}`);
+  }
 }
 
 async function createAgent(opts: CreateOptions): Promise<AgentRow> {
@@ -58,7 +79,9 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
     ens_registered: 0,
     erc8004_agent_id: null,
     arena_role: opts.arenaRole ?? null,
+    strategy: opts.strategy ?? "careful",
   });
+  if (opts.kind === "seller") born(ensName, "hedera", "Hedera account ✓");
 
   if (opts.kind === "seller") {
     step("Registering on the HireLedger (Hedera)...");
@@ -69,6 +92,11 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
       basePrice: opts.basePriceUnits,
     });
     updateAgent(key, { ledger_registered: 1 });
+    born(ensName, "ledger", "HireLedger ✓");
+    step("Spinning up its brain on 0G Compute...");
+    await spinUpBrain(agent);
+    if (opts.taskType === "code-fix") await spinUpOnSepolia(agent);
+    agent = getAgentByLabel(opts.label)!;
   }
 
   if (opts.startingUnits && opts.startingUnits > 0n) {
@@ -88,10 +116,12 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
     step(`Publishing ${ensName} in ENS (Sepolia)...`);
     try {
       await publishAgent(agent, providerKeyShort(opts.person.id));
+      born(ensName, "ens", "ENS ✓");
     } catch (err) {
       // The agent works without ENS records (local discovery); `pnpm ens:sync` can publish it later.
       log.error(`ENS publish failed for ${ensName}`, err);
       emit("info", { agentEnsName: ensName, message: `ENS publish failed: ${(err as Error).message}. Run pnpm ens:sync later.` });
+      born(ensName, "ens", "ENS ✖ run pnpm ens:sync later");
     }
   }
 
@@ -100,7 +130,18 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
   return agent;
 }
 
-export async function createSellerAgent(person: PersonRow, req: CreateAgentRequest, onStep?: (m: string) => void): Promise<AgentRow> {
+const DEFAULT_DESCRIPTIONS: Record<CreateAgentRequest["taskType"], string> = {
+  summarize: "Summarizes text in up to 5 bullet points.",
+  translate: "Translates text into Hindi or Marathi.",
+  "code-fix": "Fixes bugs in Python repositories. Paid only when hidden tests pass.",
+};
+
+export async function createSellerAgent(
+  person: PersonRow,
+  req: CreateAgentRequest,
+  onStep?: (m: string) => void,
+  strategy: AgentRow["strategy"] = "careful",
+): Promise<AgentRow> {
   let basePrice: bigint;
   try {
     basePrice = parseUnits6(req.basePrice);
@@ -108,9 +149,7 @@ export async function createSellerAgent(person: PersonRow, req: CreateAgentReque
     throw badRequest((err as Error).message);
   }
   if (basePrice <= 0n) throw badRequest("Base price must be more than 0.");
-  const description =
-    req.description?.trim() ||
-    (req.taskType === "translate" ? "Translates text into Hindi or Marathi." : "Summarizes text in up to 5 bullet points.");
+  const description = req.description?.trim() || DEFAULT_DESCRIPTIONS[req.taskType];
   return createAgent({
     person,
     label: req.label.trim().toLowerCase(),
@@ -119,6 +158,7 @@ export async function createSellerAgent(person: PersonRow, req: CreateAgentReque
     basePriceUnits: basePrice,
     description,
     startingUnits: parseUnits6(config.hedera.sellerStartingUsdc),
+    strategy,
     onStep,
   });
 }

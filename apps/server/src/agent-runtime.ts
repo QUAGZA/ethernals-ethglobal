@@ -24,10 +24,11 @@ import { emit, log } from "./events";
 import { summarize, translate } from "./llm";
 import { quoteUnits } from "./payments";
 import { withWorkspace } from "./sandbox";
+import { codeFixRefusal, runCodeFix } from "./task-runtime";
 import { parseUnits6 } from "@ethernals/shared";
 
 export const taskBodySchema = z.object({
-  input: z.string().min(1, "Input text is empty.").max(8000, "Input is limited to 8,000 characters."),
+  input: z.string().max(8000, "Input is limited to 8,000 characters.").default(""),
   translateTo: z.enum(["hi", "mr"]).nullish(),
   buyerAgent: z.string().min(3),
   consent: z
@@ -35,6 +36,8 @@ export const taskBodySchema = z.object({
     .default({ forward: false, subBudget: "0" }),
   parentHireId: z.string().nullish(),
   arena: z.boolean().optional(),
+  /** Code-fix agents work on a posted task instead of input text. */
+  taskId: z.string().optional(),
 });
 
 export type TaskBody = z.infer<typeof taskBodySchema>;
@@ -54,10 +57,23 @@ export async function handleSellerTask(req: Request, res: Response): Promise<voi
     return;
   }
   const body = parsed.data;
+  const codeFix = seller.task_type === "code-fix";
+  if (codeFix ? !body.taskId : !body.input.trim()) {
+    res.status(400).json({ error: codeFix ? "This agent works on a posted task: send taskId." : "Input text is empty." });
+    return;
+  }
   const buyer = getAgentByEnsName(body.buyerAgent) ?? getAgentByLabel(body.buyerAgent);
   if (!buyer) {
     res.status(400).json({ error: `Unknown buyer agent ${body.buyerAgent}.` });
     return;
+  }
+
+  if (codeFix) {
+    const refusal = codeFixRefusal(seller, buyer, body.taskId!);
+    if (refusal) {
+      res.status(409).json({ error: refusal });
+      return;
+    }
   }
 
   const quoted = await quoteUnits(seller);
@@ -83,7 +99,7 @@ export async function handleSellerTask(req: Request, res: Response): Promise<voi
     quoted_price: quoted.toString(),
     paid_amount: null,
     payment_tx_id: null,
-    input_hash: sha256Hex(body.input),
+    input_hash: sha256Hex(codeFix ? body.taskId! : body.input),
     output_hash: null,
     mandate_id: mandate.id,
     rating: null,
@@ -96,6 +112,21 @@ export async function handleSellerTask(req: Request, res: Response): Promise<voi
     parent_hire_id: body.parentHireId ?? null,
     arena: body.arena ? 1 : 0,
   });
+
+  if (codeFix) {
+    try {
+      const outcome = await runCodeFix({ seller, hireId, taskId: body.taskId! });
+      updateHire(hireId, { output_hash: outcome.patchHash });
+      emit("hire.delivered", { hireId, agentEnsName: seller.ens_name, message: `${seller.ens_name} submitted a patch for ${buyer.ens_name}` });
+      // The rating comes from the verifier outcome, so this hire is never auto-rated.
+      res.json({ ...outcome, hireId, result: outcome.patchHash, quotedPrice: formatUnits6(quoted), subHire: null });
+    } catch (err) {
+      updateHire(hireId, { status: "failed" });
+      log.error(`code fix failed for ${seller.ens_name}`, err);
+      res.status(500).json({ error: "The agent could not finish this task.", hint: (err as Error).message });
+    }
+    return;
+  }
 
   try {
     const { result, subHire } = await withWorkspace(hireId, async (dir) => {
@@ -120,9 +151,9 @@ async function runTask(
   mandate: MandateRow,
 ): Promise<{ result: string; subHire: SubHireOutcome | null }> {
   if (seller.task_type === "translate") {
-    return { result: await translate(body.input, body.translateTo ?? "hi"), subHire: null };
+    return { result: await translate(body.input, body.translateTo ?? "hi", seller), subHire: null };
   }
-  const summary = await summarize(body.input);
+  const summary = await summarize(body.input, seller);
   if (!body.translateTo) return { result: summary, subHire: null };
 
   // Deterministic sub-hire trigger (PRD SUB-2): "also translate" sends the summary to a translate agent.

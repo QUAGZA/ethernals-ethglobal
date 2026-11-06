@@ -12,15 +12,37 @@ import {
   sepoliaTxUrl,
   type AgentDetail,
   type AgentSummary,
+  type DuelView,
+  type TaskLinks,
+  type TaskSpec,
+  type TaskView,
+  type VerificationResult,
   type HireStatus,
   type HireView,
   type PersonPublic,
   type Reason,
 } from "@ethernals/shared";
 import { providerKeyShort } from "./agents";
+import { taskReceipts } from "./brain";
 import { config } from "./config";
-import { getAgent, getPerson, listAgentsOfPerson, listHiresForAgent, type AgentRow, type HireRow, type PersonRow } from "./db";
+import {
+  countSpecialistTasks,
+  getAgent,
+  getHire,
+  getPerson,
+  kvGet,
+  listAgentsOfPerson,
+  listHiresForAgent,
+  listSpendEventsForTask,
+  listTasksOfDuel,
+  type AgentRow,
+  type HireRow,
+  type PersonRow,
+  type TaskRow,
+} from "./db";
 import { getStats, type LedgerStats } from "./ledger";
+import { spendEventView } from "./spend";
+import { canRefund, refundEligibleAt } from "./task-service";
 
 const statsCache = new Map<string, { stats: LedgerStats; at: number }>();
 
@@ -103,11 +125,81 @@ export function hireView(h: HireRow): HireView {
   };
 }
 
-export async function agentDetail(agent: AgentRow): Promise<AgentDetail> {
+/** TaskView plus what the shared type does not carry yet (additive, read by apps/web). */
+export interface TaskDetailView extends TaskView {
+  hire: HireView | null;
+  scoreChange: { before: string | null; after: string | null } | null;
+  duelId: string | null;
+  refundableAt: string | null;
+  refundable: boolean;
+}
+
+const url = <T>(value: T | null | undefined, make: (v: T) => string) => (value ? make(value) : null);
+
+export function taskView(t: TaskRow): TaskDetailView {
+  const client = getAgent(t.client_agent_key);
+  const specialist = t.specialist_agent_key ? getAgent(t.specialist_agent_key) : undefined;
+  const hire = t.hire_id ? getHire(t.hire_id) : undefined;
+  const result = t.result_json ? (JSON.parse(t.result_json) as VerificationResult) : null;
+  const links: TaskLinks = {
+    createTx: url(t.create_tx, sepoliaTxUrl),
+    acceptTx: url(t.accept_tx, sepoliaTxUrl),
+    submitTx: url(t.submit_tx, sepoliaTxUrl),
+    settleTx: url(t.settle_tx, sepoliaTxUrl),
+    refundTx: url(t.refund_tx, sepoliaTxUrl),
+    x402Payment: url(hire?.payment_tx_id, hashscanTxUrl),
+    erc8004Request: url(t.erc8004_request_tx, sepoliaTxUrl),
+    erc8004Response: url(t.erc8004_response_tx, sepoliaTxUrl),
+    hireLedger: url(hire?.ledger_tx_hash, hashscanEvmTxUrl),
+    result: kvGet<string>(`task.result-url.${t.id}`),
+  };
+  const refundAt = refundEligibleAt(t.status, t.deadline);
+  return {
+    id: t.id,
+    chainTaskId: t.chain_task_id,
+    spec: JSON.parse(t.spec_json) as TaskSpec,
+    specHash: t.spec_hash as TaskView["specHash"],
+    testsHash: t.tests_hash as TaskView["testsHash"],
+    bounty: formatUnits6(BigInt(t.bounty)),
+    deadline: t.deadline,
+    status: t.status,
+    clientHandle: getPerson(t.client_person_id)?.handle ?? "?",
+    clientAgentEnsName: client?.ens_name ?? "?",
+    specialistEnsName: specialist?.ens_name ?? null,
+    patch: t.patch,
+    patchHash: t.patch_hash as TaskView["patchHash"],
+    explanation: t.explanation,
+    verifyJobId: t.verify_job_id,
+    result,
+    hireId: t.hire_id,
+    inference: taskReceipts(t.id),
+    spend: listSpendEventsForTask(t.id).map(spendEventView),
+    links,
+    error: t.error,
+    createdAt: t.created_at,
+    hire: hire ? hireView(hire) : null,
+    scoreChange: kvGet<{ before: string | null; after: string | null }>(`task.score.${t.id}`),
+    duelId: t.duel_id,
+    refundableAt: refundAt === null || !t.chain_task_id ? null : new Date(refundAt).toISOString(),
+    refundable: Boolean(t.chain_task_id) && canRefund(t.status, t.deadline),
+  };
+}
+
+export function duelView(id: string): DuelView {
+  const [first, second] = listTasksOfDuel(id).map(taskView);
+  return { id, tasks: [first, second] };
+}
+
+export async function agentDetail(agent: AgentRow): Promise<AgentDetail & { erc8004AgentId: string | null; tasksPassed: number; tasksFailed: number; strategy: AgentRow["strategy"] }> {
   const summary = await agentView(agent);
   const siblings = listAgentsOfPerson(agent.person_id).filter((a) => a.kind === "seller" && a.key !== agent.key);
+  const tasks = countSpecialistTasks(agent.key);
   return {
     ...summary,
+    erc8004AgentId: agent.erc8004_agent_id,
+    tasksPassed: tasks.passed,
+    tasksFailed: tasks.failed,
+    strategy: agent.strategy,
     hires: listHiresForAgent(agent.key, 60).map(hireView),
     ensAppUrl: ensAppUrl(agent.ens_name),
     hederaAccountUrl: hashscanAccountUrl(agent.hedera_account_id),

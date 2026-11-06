@@ -60,6 +60,8 @@ export async function hireAsAgent(params: {
   autoRate?: boolean;
   fixedRating?: number;
   arena?: boolean;
+  /** A proof-of-work task: the x402 payment is the attempt fee. */
+  taskId?: string;
 }): Promise<HireResult> {
   const target = getAgentByEnsName(params.targetEnsName);
   const found = await discover(params.targetEnsName);
@@ -101,6 +103,7 @@ export async function hireAsAgent(params: {
         consent: params.consent,
         parentHireId: params.parentHireId ?? null,
         arena: params.arena ?? false,
+        taskId: params.taskId,
       }),
     });
   } catch (err) {
@@ -117,6 +120,9 @@ export async function hireAsAgent(params: {
     body = JSON.parse(text);
   } catch {
     body = { error: text.slice(0, 300) };
+  }
+  if (response.status === 503 && body.error === "agent_dormant") {
+    throw new AppError(503, `${params.targetEnsName} is dormant, so nothing was paid.`, body.hint);
   }
   if (!response.ok || !body.hireId) {
     const hint = response.status === 402 ? "The facilitator rejected the payment. Run pnpm check-setup to check balances." : body.hint;

@@ -3,40 +3,54 @@ import { Router, type Request, type Response } from "express";
 import { verifyMessage } from "viem";
 import { z } from "zod";
 import {
+  ESCROW_CHAIN_ID,
   formatUnits6,
   type ArenaState,
   type HireResponse,
   type MeResponse,
   type PublicConfig,
+  type SpendStateView,
   type StatsResponse,
+  type TryOverspendResponse,
 } from "@ethernals/shared";
 import { createSellerAgent, ensureBuyerAgent } from "./agents";
 import { getArenaState, runEthernalsAttack, runOpenAttack } from "./arena";
+import { agentReceipts, brainView, resolveModel } from "./brain";
 import { hireAsAgent } from "./buyer";
 import { config } from "./config";
 import { createSessionToken, randomId, readSessionToken } from "./crypto";
 import {
   countHires,
+  deleteSpendAccount,
   findPersonByHandle,
   findPersonByNullifier,
   getAgent,
   getAgentByEnsName,
   getAgentByLabel,
+  getDuel,
   getHire,
   getPerson,
+  getTask,
   insertPerson,
   listAgents,
   listAgentsOfPerson,
   listHiresByBuyer,
+  listSpendEvents,
+  listTasks,
   setCredentialExpiry,
+  upsertSpendAccount,
   type PersonRow,
 } from "./db";
 import { AppError, badRequest, conflict, forbidden, notFound, unauthorized } from "./errors";
 import { emit, log, recentEvents, subscribe } from "./events";
 import { getBalances } from "./hedera";
 import { createRpContext, verifyWorldProof } from "./identity";
+import { buildNameraGuard, encryptNameraKey, guardFor, spendEventView } from "./spend";
+import { connectNameraSchema, createDuelSchema, createTaskSchema, hireForTaskSchema } from "./task-schemas";
+import { clientBuyer, createDuel, createTask, hireSpecialist, refundTask, tryOverspend } from "./task-service";
 import { submitRating } from "./verifier";
-import { agentDetail, agentView, hireView, personView } from "./views";
+import { verifierHealth } from "./verifier-client";
+import { agentDetail, agentView, duelView, hireView, personView, taskView } from "./views";
 
 const COOKIE = "ethernals_session";
 const HANDLE_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$/;
@@ -104,10 +118,22 @@ async function meResponse(person: PersonRow | null): Promise<MeResponse> {
   };
 }
 
+function agentByName(name: string) {
+  const agent = getAgentByLabel(name) ?? getAgentByEnsName(name);
+  if (!agent) throw notFound(`No agent named ${name}.`);
+  return agent;
+}
+
+function taskById(id: string) {
+  const task = getTask(id);
+  if (!task) throw notFound("Unknown task.");
+  return task;
+}
+
 const verifySchema = z.object({ handle: z.string(), proof: z.unknown() });
 const createAgentSchema = z.object({
   label: z.string().min(1),
-  taskType: z.enum(["summarize", "translate"]),
+  taskType: z.enum(["summarize", "translate", "code-fix"]),
   basePrice: z.string().min(1),
   description: z.string().max(200).optional(),
 });
@@ -130,7 +156,7 @@ export function createApi(): Router {
     res.json({ ok: true });
   });
 
-  r.get("/api/config", (_req, res) => {
+  r.get("/api/config", async (_req, res) => {
     const body: PublicConfig = {
       appName: config.appName,
       ensParent: config.ens.parentOrNull() ?? "",
@@ -148,6 +174,9 @@ export function createApi(): Router {
       hederaNetwork: "testnet",
       paymentAsset: config.hedera.paymentAsset,
       ledgerAddress: config.hedera.ledgerAddressOrNull(),
+      zeroG: { enabled: config.zeroG.enabled(), network: config.zeroG.network(), model: config.zeroG.model() ?? (await resolveModel().then((m) => m.id, () => "")) },
+      namera: { enabled: config.namera.enabled() },
+      escrow: { address: config.escrow.addressOrNull(), token: config.escrow.tokenOrNull(), chainId: ESCROW_CHAIN_ID },
       sepoliaRpcUrl: config.sepolia.publicRpcUrl,
       ensUniversalResolver: config.ens.universalResolver,
     };
@@ -239,6 +268,52 @@ export function createApi(): Router {
     res.json(buyer ? listHiresByBuyer(buyer.key).map(hireView) : []);
   });
 
+  // ------------------------------------------------------------------ spending controls
+  r.get("/api/me/spend", async (req, res) => {
+    const person = requirePerson(req);
+    const guard = await guardFor(person, clientBuyer(person));
+    const body: SpendStateView = {
+      guard: guard.kind,
+      policy: await guard.policy().catch(() => null),
+      recent: listSpendEvents(person.id, 10).map(spendEventView),
+    };
+    res.json(body);
+  });
+
+  r.post("/api/me/spend/connect", async (req, res) => {
+    const person = requirePerson(req);
+    const body = connectNameraSchema.parse(req.body);
+    if (!config.namera.enabled()) throw conflict("Namera is turned off on this server (NAMERA_ENABLED=false).");
+    const guard = await buildNameraGuard({ apiKey: body.apiKey.trim(), walletId: body.walletId.trim(), sessionKeyId: body.sessionKeyId.trim() });
+    let policy;
+    try {
+      policy = await guard.policy();
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      throw badRequest("Namera did not accept those details.", "Check the API key, wallet id and session key id in your Namera dashboard.");
+    }
+    upsertSpendAccount({
+      person_id: person.id,
+      api_key_enc: encryptNameraKey(body.apiKey),
+      wallet_id: body.walletId.trim(),
+      session_key_id: body.sessionKeyId.trim(),
+      wallet_address: policy.accountAddress,
+    });
+    res.json(policy);
+  });
+
+  r.delete("/api/me/spend", (req, res) => {
+    deleteSpendAccount(requirePerson(req).id);
+    res.json({ ok: true });
+  });
+
+  r.post("/api/me/spend/try-overspend", async (req, res) => {
+    if (!config.demoMode) throw forbidden("Demo controls are off (DEMO_MODE=false).");
+    const person = requirePerson(req);
+    const body: TryOverspendResponse = { event: await tryOverspend(person, await guardFor(person, clientBuyer(person))) };
+    res.json(body);
+  });
+
   // ------------------------------------------------------------------ agents
   r.get("/api/agents", async (_req, res) => {
     const sellers = listAgents("seller").filter((a) => !a.arena_role);
@@ -250,6 +325,14 @@ export function createApi(): Router {
     const agent = getAgentByLabel(label) ?? getAgentByEnsName(label);
     if (!agent) throw notFound(`No agent named ${label}.`);
     res.json(await agentDetail(agent));
+  });
+
+  r.get("/api/agents/:label/brain", (req, res) => {
+    res.json(brainView(agentByName(String(req.params.label))));
+  });
+
+  r.get("/api/agents/:label/inference", (req, res) => {
+    res.json(agentReceipts(agentByName(String(req.params.label))));
   });
 
   r.post("/api/agents", async (req, res) => {
@@ -305,6 +388,57 @@ export function createApi(): Router {
     const hire = getHire(String(req.params.id));
     if (!hire) throw notFound("Unknown hire.");
     res.json(hireView(hire));
+  });
+
+  // ------------------------------------------------------------------ proof-of-work tasks
+  r.get("/api/tasks", (_req, res) => {
+    res.json(listTasks().map(taskView));
+  });
+
+  r.post("/api/tasks", async (req, res) => {
+    const person = requirePerson(req);
+    res.json(taskView(await createTask(person, createTaskSchema.parse(req.body))));
+  });
+
+  r.get("/api/tasks/:id/spec.json", (req, res) => {
+    // Exactly the bytes that were hashed into specHash.
+    res.type("application/json").send(taskById(String(req.params.id)).spec_json);
+  });
+
+  r.get("/api/tasks/:id/patch.diff", (req, res) => {
+    const task = taskById(String(req.params.id));
+    if (!task.patch) throw notFound("No patch was submitted for this task.");
+    res.type("text/plain").send(task.patch);
+  });
+
+  r.get("/api/tasks/:id", (req, res) => {
+    res.json(taskView(taskById(String(req.params.id))));
+  });
+
+  r.post("/api/tasks/:id/hire", async (req, res) => {
+    const person = requirePerson(req);
+    const body = hireForTaskSchema.parse(req.body);
+    res.json(taskView(await hireSpecialist(person, String(req.params.id), body.specialist)));
+  });
+
+  r.post("/api/tasks/:id/refund", async (req, res) => {
+    res.json(taskView(await refundTask(requirePerson(req), String(req.params.id))));
+  });
+
+  r.post("/api/duels", async (req, res) => {
+    const person = requirePerson(req);
+    const duel = await createDuel(person, createDuelSchema.parse(req.body));
+    res.json(duelView(duel.id));
+  });
+
+  r.get("/api/duels/:id", (req, res) => {
+    const id = String(req.params.id);
+    if (!getDuel(id)) throw notFound("Unknown duel.");
+    res.json(duelView(id));
+  });
+
+  r.get("/api/verifier/health", async (_req, res) => {
+    res.json(await verifierHealth());
   });
 
   // ------------------------------------------------------------------ events (SSE)
