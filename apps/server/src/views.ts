@@ -22,6 +22,7 @@ import {
   type HireView,
   type PersonPublic,
   type Reason,
+  TASK_TYPES,
 } from "@ethernals/shared";
 import { providerKeyShort } from "./agents";
 import { taskReceipts } from "./brain";
@@ -139,7 +140,7 @@ export async function agentView(agent: AgentRow): Promise<AgentSummary> {
 /** An agent found on-chain that another server hosts. Reputation comes straight from the ledger. */
 export async function remoteAgentView(row: ChainAgentRow): Promise<AgentSummary> {
   const s = await stats({ key: row.key, kind: "seller", ledger_registered: 1 } as AgentRow);
-  const taskType = (["summarize", "translate", "code-fix"] as const).find((t) => t === row.task_type) ?? null;
+  const taskType = TASK_TYPES.find((t) => t === row.task_type) ?? null;
   const base = s?.basePrice ?? 0n;
   return {
     key: row.key,

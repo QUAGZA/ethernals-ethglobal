@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { SandboxRefusal, SandboxRunStatus, SpendGuardKind, TaskStatus } from "@ethernals/shared";
+import type { SandboxRefusal, SandboxRunStatus, SpendGuardKind, TaskStatus, TaskType } from "@ethernals/shared";
 import { config } from "./config";
 
 export interface PersonRow {
@@ -27,7 +27,7 @@ export interface AgentRow {
   evm_address: string;
   enc_private_key: string;
   base_price: string; // atomic units
-  task_type: "summarize" | "translate" | "code-fix" | null;
+  task_type: TaskType | null;
   description: string;
   budget_remaining: string; // atomic units (buyer agents)
   ledger_registered: number;

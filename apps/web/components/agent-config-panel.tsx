@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useState, type FormEvent } from "react";
-import type { AddAgentToolRequest, ZgModelType } from "@ethernals/shared";
+import type { AddAgentToolRequest, TaskType, ZgModelType } from "@ethernals/shared";
+import { modelTypeFor } from "@ethernals/shared";
 import { ApiRequestError, api, toApiError } from "@/lib/api";
 import { useLoad } from "@/lib/hooks";
 import { ErrorNotice } from "./error-notice";
@@ -20,7 +21,7 @@ const field = "mt-1 block w-full border-b border-ink bg-transparent py-2 text-[1
 const button = "cursor-pointer border border-ink bg-yellow px-4 py-2 text-[12px] tracking-[.08em] text-ink hover:bg-ink hover:text-yellow disabled:cursor-not-allowed disabled:opacity-40";
 
 /** Owner-only: the agent's 0G model, system prompt, own key, and the MCP servers and HTTP tools it can call. */
-export function AgentConfigPanel({ label }: { label: string }) {
+export function AgentConfigPanel({ label, taskType }: { label: string; taskType: TaskType | null }) {
   const toast = useToast();
   const loader = useCallback(() => api.agentConfig(label), [label]);
   const cfg = useLoad(loader, `config:${label}`);
@@ -82,7 +83,7 @@ export function AgentConfigPanel({ label }: { label: string }) {
           <label className="eyebrow block">
             Model type
             <select className={`${field} cursor-pointer`} value={type} onChange={(e) => setModelType(e.target.value as ZgModelType)}>
-              {MODEL_TYPES.map((t) => (
+              {MODEL_TYPES.filter((t) => !taskType || t.id === modelTypeFor(taskType)).map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.label}
                 </option>

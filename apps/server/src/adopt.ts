@@ -4,7 +4,7 @@
  * server's root secret really controls the agent's account, so a server with a different secret can never fake it.
  * The agent's config and encrypted secrets are then restored from its ENS records.
  */
-import { ENS_KEYS } from "@ethernals/shared";
+import { ENS_KEYS, TASK_TYPES } from "@ethernals/shared";
 import { accountEvmAddress, parseEcdsaKey } from "./hedera";
 import { decryptSecret, deriveAgentKeyHex, encryptSecret, providerKey } from "./crypto";
 import { config } from "./config";
@@ -55,7 +55,7 @@ async function adoptOne(person: PersonRow, row: ChainAgentRow): Promise<boolean>
     evm_address: evm,
     enc_private_key: encryptSecret(derived),
     base_price: stats.basePrice.toString(),
-    task_type: (["summarize", "translate", "code-fix"] as const).find((t) => t === row.task_type) ?? null,
+    task_type: TASK_TYPES.find((t) => t === row.task_type) ?? null,
     description: row.description,
     budget_remaining: "0",
     ledger_registered: 1,

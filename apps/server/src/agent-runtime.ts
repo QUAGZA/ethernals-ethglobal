@@ -21,7 +21,7 @@ import {
   type MandateRow,
 } from "./db";
 import { emit, log } from "./events";
-import { summarize, translate } from "./llm";
+import { generate, summarize, translate } from "./llm";
 import { quoteUnits } from "./payments";
 import { withWorkspace } from "./sandbox";
 import { codeFixRefusal, runCodeFix } from "./task-runtime";
@@ -150,6 +150,9 @@ async function runTask(
   hireId: string,
   mandate: MandateRow,
 ): Promise<{ result: string; subHire: SubHireOutcome | null; assistants?: SubHireOutcome[] }> {
+  if (seller.task_type === "image-gen" || seller.task_type === "video-gen") {
+    return { result: await generate(body.input, seller, seller.task_type), subHire: null };
+  }
   if (body.consent.maxAssistants > 0) {
     // Imported lazily to avoid a cycle (assistants -> buyer -> agent-runtime).
     const { isTextAgent, runWithAssistants } = await import("./assistants");

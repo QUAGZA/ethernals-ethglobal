@@ -4,7 +4,26 @@
  */
 import type { Reason } from "./reasons";
 
-export type TaskType = "summarize" | "translate" | "code-fix";
+/** "code-fix" is the stored id of the Code gen type: it is written in ENS records, escrow specs and the verifier. */
+export const TASK_TYPES = ["image-gen", "video-gen", "code-fix", "summarize", "translate"] as const;
+export type TaskType = (typeof TASK_TYPES)[number];
+
+export const TASK_TYPE_LABELS: Record<TaskType, string> = {
+  "image-gen": "Image gen",
+  "video-gen": "Video gen",
+  "code-fix": "Code gen",
+  summarize: "Summarize",
+  translate: "Translate",
+};
+
+/** The kind of 0G model each task type thinks on. */
+export function modelTypeFor(taskType: TaskType): "text" | "image" | "video" {
+  if (taskType === "image-gen") return "image";
+  return taskType === "video-gen" ? "video" : "text";
+}
+
+/** Used when a provider leaves the model blank. */
+export const DEFAULT_MEDIA_MODELS = { image: "minimax-image-01", video: "bytedance/seedance-2.0-mini" } as const;
 export type AgentKind = "seller" | "buyer";
 export type HumanMode = "idkit" | "agentkit" | "dev";
 

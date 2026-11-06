@@ -3,7 +3,7 @@
  * with live records, and — for buyer agents — a starting USDC balance and budget.
  */
 import { namehash } from "viem/ens";
-import { assertValidLabel, formatUnits6, parseUnits6, type CreateAgentRequest } from "@ethernals/shared";
+import { assertValidLabel, DEFAULT_MEDIA_MODELS, formatUnits6, modelTypeFor, parseUnits6, type CreateAgentRequest, type TaskType } from "@ethernals/shared";
 import { config } from "./config";
 import { spinUpBrain } from "./brain";
 import { deriveAgentKeyHex, encryptSecret, personHash, providerKey } from "./crypto";
@@ -23,7 +23,7 @@ interface CreateOptions {
   person: PersonRow;
   label: string;
   kind: "seller" | "buyer";
-  taskType: "summarize" | "translate" | "code-fix" | null;
+  taskType: TaskType | null;
   basePriceUnits: bigint;
   description: string;
   startingUnits?: bigint;
@@ -135,6 +135,8 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
 }
 
 const DEFAULT_DESCRIPTIONS: Record<CreateAgentRequest["taskType"], string> = {
+  "image-gen": "Generates an image from a text prompt.",
+  "video-gen": "Generates a short video from a text prompt.",
   summarize: "Summarizes text in up to 5 bullet points.",
   translate: "Translates text into Hindi or Marathi.",
   "code-fix": "Fixes bugs in Python repositories. Paid only when hidden tests pass.",
@@ -154,6 +156,9 @@ export async function createSellerAgent(
   }
   if (basePrice <= 0n) throw badRequest("Base price must be more than 0.");
   const description = req.description?.trim() || DEFAULT_DESCRIPTIONS[req.taskType];
+  // The task type decides the model family, so an agent can't be sold as one thing and think on another.
+  const modelType = modelTypeFor(req.taskType);
+  const model = req.model?.trim() || (modelType === "text" ? undefined : DEFAULT_MEDIA_MODELS[modelType]);
   return createAgent({
     person,
     label: req.label.trim().toLowerCase(),
@@ -164,8 +169,8 @@ export async function createSellerAgent(
     startingUnits: parseUnits6(config.hedera.sellerStartingUsdc),
     strategy,
     zgApiKey: req.zgApiKey?.trim() || undefined,
-    modelType: req.modelType,
-    model: req.model?.trim() || undefined,
+    modelType,
+    model,
     systemPrompt: req.systemPrompt?.trim() || undefined,
     onStep,
   });

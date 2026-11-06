@@ -227,11 +227,12 @@ export function setRetryDelayForTests(ms: number): void {
   retryDelayMs = ms;
 }
 
-async function postChat(apiKey: string, payload: unknown, path = "/chat/completions"): Promise<Response> {
+/** `sealed` pins the call to TEE providers, and 0G then answers 503 rather than falling back. */
+async function postChat(apiKey: string, payload: unknown, path = "/chat/completions", sealed = true): Promise<Response> {
   const send = () =>
     safeFetch()(`${config.zeroG.routerBaseUrl()}${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}`, [TRUST_MODE_HEADER]: TRUST_MODE },
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}`, ...(sealed ? { [TRUST_MODE_HEADER]: TRUST_MODE } : {}) },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -247,8 +248,8 @@ function agentApiKey(brain: BrainRow | undefined): string | null {
   return config.zeroG.apiKeyOrNull();
 }
 
-async function callRouter(key: string, payload: unknown, path = "/chat/completions"): Promise<{ res: Response; body: ChatResponse }> {
-  const res = await postChat(key, payload, path);
+async function callRouter(key: string, payload: unknown, path = "/chat/completions", sealed = true): Promise<{ res: Response; body: ChatResponse }> {
+  const res = await postChat(key, payload, path, sealed);
   if (!res.ok) throw new RouterError(res.status, `The 0G Router answered HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return { res, body: (await res.json()) as ChatResponse };
 }
@@ -261,20 +262,22 @@ export async function think(agent: AgentRow | null, request: ThinkRequest): Prom
   const stored = agent ? getBrain(agent.key) : undefined;
   const brain = agent ? (stored ?? ensureBrain(agent, await resolveModel())) : undefined;
   const modelType = (brain?.model_type as ModelType | undefined) ?? "text";
-  const usable = await usableModel(brain, modelType);
+  const usable = await usableModel(brain);
 
   const ownKey = agent ? agentApiKey(brain) : config.zeroG.apiKeyOrNull();
   if (!ownKey) throw new RouterError(503, "No 0G API key is set. Add ZG_API_KEY to .env (see SETUP.md).");
   const shared = config.zeroG.apiKeyOrNull();
+  // No video model and few image models have a TEE provider, so those run on standard providers. Text always stays sealed.
+  const sealed = modelType === "text" || isSealed(usable);
 
   const send = async (payload: unknown, path: string) => {
     try {
-      return await callRouter(ownKey, payload, path);
+      return await callRouter(ownKey, payload, path, sealed);
     } catch (err) {
       const keyRefused = err instanceof RouterError && (err.status === 401 || err.status === 403);
       if (!keyRefused || !shared || shared === ownKey) throw err;
       emit("info", { agentEnsName: agent?.ens_name, message: "This agent's 0G key was refused, so it used the shared key." });
-      return callRouter(shared, payload, path);
+      return callRouter(shared, payload, path, sealed);
     }
   };
 
@@ -345,8 +348,7 @@ export async function think(agent: AgentRow | null, request: ThinkRequest): Prom
 }
 
 /** The agent's chosen model. Non-text models are not in the chat model list, so they skip it. A slow Router never blocks a text agent that already has a model. */
-async function usableModel(brain: BrainRow | undefined, modelType: ModelType): Promise<RouterModel> {
-  if (brain?.model && modelType !== "text") return { id: brain.model };
+async function usableModel(brain: BrainRow | undefined): Promise<RouterModel> {
   if (brain?.model) {
     try {
       return (await loadModels()).find((m) => m.id === brain.model) ?? { id: brain.model };
@@ -458,13 +460,13 @@ function ensureBrain(agent: AgentRow, model: RouterModel): BrainRow {
 }
 
 /** POST /v1/api-keys with the management key, as a private key. The Router's docs do not fix the field name of the secret, so accept the likely ones. */
-export async function createAgentKey(name: string): Promise<string> {
+export async function createAgentKey(name: string, trustMode = TRUST_MODE): Promise<string> {
   const management = config.zeroG.managementKey();
   if (!management) throw new RouterError(503, "ZG_MANAGEMENT_KEY is not set.");
   const res = await safeFetch()(`${config.zeroG.routerBaseUrl()}/api-keys`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${management}` },
-    body: JSON.stringify({ name, trust_mode: TRUST_MODE }),
+    body: JSON.stringify({ name, trust_mode: trustMode }),
   });
   if (!res.ok) throw new RouterError(res.status, `Key creation answered HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const body = (await res.json()) as Record<string, unknown> & { data?: Record<string, unknown> };
@@ -512,7 +514,8 @@ export async function spinUpBrain(agent: AgentRow, opts: BrainOptions = {}): Pro
       keyLabel = `${ownKey.slice(0, 5)}…${ownKey.slice(-4)}`;
       born(agent, "brain-key", "0G brain key ✓ (your own key)");
     } else {
-      encrypted = encryptSecret(await createAgentKey(agent.ens_name));
+      // A private key could never reach a video model, so media agents' keys stay standard and each call sets its mode.
+      encrypted = encryptSecret(await createAgentKey(agent.ens_name, modelType === "text" ? TRUST_MODE : "standard"));
       keyLabel = agent.ens_name;
       born(agent, "brain-key", "0G brain key ✓");
     }
