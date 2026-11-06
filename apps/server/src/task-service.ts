@@ -80,9 +80,11 @@ export async function loadTemplate(name: "slugify", tasksDir = path.join(ROOT_DI
   } catch {
     throw new AppError(503, `The "${name}" demo task is missing.`, "Dev A adds demo/tasks/slugify. Merge main.");
   }
-  const spec = JSON.parse(raw) as Template["spec"];
+  const { issueFile, ...fields } = JSON.parse(raw) as Template["spec"] & { issueFile?: string };
+  const issue = issueFile ? (await fs.readFile(path.join(dir, issueFile), "utf8")).trim() : fields.issue;
+  const spec: Template["spec"] = { title: fields.title, repoUrl: fields.repoUrl, baseCommit: fields.baseCommit, issue, testCommand: fields.testCommand };
   if (!/^[0-9a-f]{40}$/.test(spec.baseCommit ?? "") || !spec.repoUrl) {
-    throw new AppError(503, `The "${name}" demo task has no repo yet.`, "Fill repoUrl and baseCommit in demo/tasks/slugify/task.json.");
+    throw new AppError(503, `The "${name}" demo task has no repo yet.`, "Push demo/tasks/slugify/repo to GitHub, then fill repoUrl and baseCommit in demo/tasks/slugify/task.json.");
   }
   return { spec, hiddenTests: { files: await filesUnder(path.join(dir, "hidden_tests"), "") } };
 }
