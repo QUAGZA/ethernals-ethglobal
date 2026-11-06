@@ -25,6 +25,18 @@ const EVENT_TYPES: EventType[] = [
   "arena.open.done",
   "arena.ethernals.progress",
   "arena.ethernals.done",
+  "task.created",
+  "task.accepted",
+  "task.submitted",
+  "verify.status",
+  "verify.log",
+  "verify.result",
+  "task.settled",
+  "task.refunded",
+  "agent.born",
+  "inference.receipt",
+  "spend.allowed",
+  "spend.blocked",
   "info",
 ];
 

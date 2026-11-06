@@ -19,6 +19,17 @@ const TYPE_LABELS: Record<string, string> = {
   "arena.open.done": "ERC-8004",
   "arena.ethernals.progress": "FARM",
   "arena.ethernals.done": "FARM",
+  "task.created": "TASK",
+  "task.accepted": "TASK",
+  "task.submitted": "TASK",
+  "task.settled": "SETTLED",
+  "task.refunded": "REFUND",
+  "verify.status": "VERIFIER",
+  "verify.result": "VERIFIER",
+  "agent.born": "SPIN-UP",
+  "inference.receipt": "0G",
+  "spend.allowed": "SPEND",
+  "spend.blocked": "BLOCKED",
   info: "INFO",
 };
 
@@ -58,7 +69,8 @@ export function EventLog({
   return (
     <ol className={`m-0 list-none p-0 ${large ? "text-[14px]" : ""}`}>
       {events.map((e) => {
-        const reason = typeof e.data.reason === "string" ? e.data.reason : null;
+        // spend.blocked and task.settled carry plain-language reasons, not reputation reason codes.
+        const reason = typeof e.data.reason === "string" && e.type !== "spend.blocked" && e.type !== "task.settled" ? e.data.reason : null;
         const txUrl = eventString(e, "txUrl");
         const ensUrl = eventString(e, "ensUrl");
         return (

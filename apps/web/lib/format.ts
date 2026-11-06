@@ -47,3 +47,14 @@ export function labelOf(ensName: string, ensParent?: string | null): string {
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
+
+/** Neuron (1e18 = 1 0G) as a short 0G amount. */
+export function neuronTo0g(neuron: string | null | undefined): string {
+  if (!neuron) return "—";
+  try {
+    const milli = (BigInt(neuron) * 10_000n) / 10n ** 18n;
+    return (Number(milli) / 10_000).toFixed(4);
+  } catch {
+    return neuron;
+  }
+}

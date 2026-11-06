@@ -15,6 +15,7 @@ import { HireTable } from "./hire-table";
 import { PageHeading, Stat } from "./page-heading";
 import { ProgressNote, type ProgressStep } from "./progress-note";
 import { SignInGate } from "./sign-in-gate";
+import { SpinUpChecklist, useSpinUp } from "./spin-up-checklist";
 import { useToast } from "./toast-provider";
 
 const CREATE_STEPS: ProgressStep[] = [
@@ -40,6 +41,7 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
   const [created, setCreated] = useState<AgentSummary | null>(null);
 
   const ensName = label && config ? `${label}.${config.ensParent}` : null;
+  const spinUp = useSpinUp(since !== null ? ensName : null);
 
   // Show the server's own progress messages for this agent while it is being created.
   useEvents((message) => {
@@ -64,6 +66,7 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
     }
     setSince(Date.now());
     setLive(null);
+    spinUp.reset();
     try {
       const agent = await api.createAgent({
         label,
@@ -114,14 +117,19 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
               className={`${fieldClass} cursor-pointer`}
               value={taskType}
               disabled={busy}
-              onChange={(e) => setTaskType(e.target.value as TaskType)}
+              onChange={(e) => {
+                const next = e.target.value as TaskType;
+                setTaskType(next);
+                if (next === "code-fix") setBasePrice("0.05");
+              }}
             >
               <option value="summarize">summarize</option>
               <option value="translate">translate</option>
+              <option value="code-fix">Code fix (Python)</option>
             </select>
           </label>
           <label className="eyebrow block">
-            Base price (USDC)
+            {taskType === "code-fix" ? "Attempt fee (USDC)" : "Base price (USDC)"}
             <input className={fieldClass} inputMode="decimal" value={basePrice} disabled={busy} onChange={(e) => setBasePrice(e.target.value)} />
           </label>
         </div>
@@ -148,6 +156,7 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
           {busy ? "CREATING…" : "CREATE AGENT →"}
         </button>
         {since !== null && <ProgressNote startedAt={since} steps={CREATE_STEPS} live={live} />}
+        {(since !== null || spinUp.steps.length > 0) && <SpinUpChecklist steps={spinUp.steps} codeFix={taskType === "code-fix"} />}
         <ErrorNotice error={error} title="The agent was not created" />
         {created && (
           <div className="border-l-[5px] border-good bg-good/10 px-4 py-3 leading-[1.6]">

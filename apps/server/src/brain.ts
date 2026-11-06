@@ -28,6 +28,7 @@ const PRICING_TTL_MS = 10 * 60 * 1000;
 /** Thinking models spend tokens on reasoning before they answer. */
 const MIN_MAX_TOKENS = 4000;
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+const MODELS_TIMEOUT_MS = 10_000;
 const PLATFORM_AGENT_KEY = "platform";
 
 export interface RouterModel {
@@ -79,7 +80,7 @@ export function clearModelCache(): void {
 export async function loadModels(): Promise<RouterModel[]> {
   if (modelCache && Date.now() - modelCache.at < PRICING_TTL_MS) return modelCache.models;
   try {
-    const res = await safeFetch()(`${config.zeroG.routerBaseUrl()}/models`);
+    const res = await safeFetch()(`${config.zeroG.routerBaseUrl()}/models`, { signal: AbortSignal.timeout(MODELS_TIMEOUT_MS) });
     if (!res.ok) throw new RouterError(res.status, `The 0G Router answered HTTP ${res.status} for /models.`);
     const body = (await res.json()) as { data?: RouterModel[] };
     modelCache = { models: body.data ?? [], at: Date.now() };
@@ -113,6 +114,13 @@ export function chooseModel(models: RouterModel[], preferred = config.zeroG.mode
 
 export async function resolveModel(): Promise<RouterModel> {
   return chooseModel(await loadModels());
+}
+
+/** The model name without waiting on the Router, so a slow Router never holds up the web app. Refreshes in the background. */
+export function currentModelId(): string {
+  void loadModels().catch(() => undefined);
+  const known = config.zeroG.model() ?? (modelCache ? chooseModel(modelCache.models).id : null);
+  return known ?? PREFERRED_MODEL;
 }
 
 export function costOf(model: RouterModel, promptTokens: number, completionTokens: number): bigint {

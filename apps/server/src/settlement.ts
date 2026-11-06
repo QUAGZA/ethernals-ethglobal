@@ -41,18 +41,25 @@ function waitForRecorded(hireId: string, ms: number): Promise<{ score?: string; 
   });
 }
 
-/** Sends the verified outcome to the HireLedger. Returns false if the x402 receipt has not arrived yet, so it can retry. */
+const rating = new Set<string>();
+
+/** Sends the verified outcome to the HireLedger. Returns null if the x402 receipt has not arrived yet, so it can retry. */
 async function rateOutcome(task: TaskRow, passed: boolean, waitMs: number): Promise<{ score?: string; price?: string } | null> {
   const hire = task.hire_id ? getHire(task.hire_id) : undefined;
-  if (!hire?.payment_tx_id) return null;
-  const specialist = getAgent(hire.agent_key);
-  const before = specialist ? await scoreNow(specialist.key) : null;
-  const recorded = waitForRecorded(hire.id, waitMs);
-  await submitRating({ hireId: hire.id, rating: ratingFor(passed), paymentTxId: hire.payment_tx_id });
-  updateTask(task.id, { rating_submitted: 1 });
-  const outcome = await recorded;
-  kvSet(`task.score.${task.id}`, { before, after: outcome?.score ?? null });
-  return outcome;
+  if (!hire?.payment_tx_id || rating.has(task.id)) return null;
+  rating.add(task.id);
+  try {
+    const specialist = getAgent(hire.agent_key);
+    const before = specialist ? await scoreNow(specialist.key) : null;
+    const recorded = waitForRecorded(hire.id, waitMs);
+    await submitRating({ hireId: hire.id, rating: ratingFor(passed), paymentTxId: hire.payment_tx_id });
+    updateTask(task.id, { rating_submitted: 1 });
+    const outcome = await recorded;
+    kvSet(`task.score.${task.id}`, { before, after: outcome?.score ?? null });
+    return outcome;
+  } finally {
+    rating.delete(task.id);
+  }
 }
 
 async function settle(task: TaskRow, passed: boolean, waitMs: number): Promise<void> {

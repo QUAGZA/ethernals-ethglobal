@@ -8,18 +8,47 @@ import type {
   ApiError,
   ArenaRunRequest,
   ArenaState,
+  AgentBrainView,
+  ConnectNameraRequest,
   CreateAgentRequest,
+  CreateDuelRequest,
+  CreateTaskRequest,
   DevLoginRequest,
   HireRequest,
   HireResponse,
   HireView,
+  InferenceReceipt,
   MeResponse,
   PublicConfig,
   RateResponse,
   RpContext,
+  SpendPolicyView,
+  SpendStateView,
   StatsResponse,
+  TaskSpec,
+  TaskView,
+  TryOverspendResponse,
+  VerifierHealth,
   WorldVerifyRequest,
 } from "@ethernals/shared";
+
+/** The server's task view, with fields the shared type does not carry yet. */
+export interface TaskDetail extends TaskView {
+  hire: HireView | null;
+  scoreChange: { before: string | null; after: string | null } | null;
+  duelId: string | null;
+  refundableAt: string | null;
+  refundable: boolean;
+}
+
+export interface DuelDetail {
+  id: string;
+  tasks: [TaskDetail, TaskDetail];
+}
+
+export type AgentDetailPlus = AgentDetail & { erc8004AgentId: string | null; tasksPassed: number; tasksFailed: number };
+
+export type TaskTemplate = Pick<TaskSpec, "title" | "repoUrl" | "baseCommit" | "issue"> & { id: "slugify" };
 
 export const SERVER_DOWN_HINT = "Is the server running? Start everything with pnpm dev";
 
@@ -42,7 +71,7 @@ export function toApiError(err: unknown): ApiRequestError {
   return new ApiRequestError(0, String(err));
 }
 
-type RequestOptions = { method?: "GET" | "POST"; body?: unknown; signal?: AbortSignal };
+type RequestOptions = { method?: "GET" | "POST" | "DELETE"; body?: unknown; signal?: AbortSignal };
 
 async function request<T>(path: string, { method = "GET", body, signal }: RequestOptions = {}): Promise<T> {
   let res: Response;
@@ -103,12 +132,29 @@ export const api = {
   restorePass: () => post<MeResponse>("/api/me/restore-pass"),
 
   agents: () => get<AgentSummary[]>("/api/agents"),
-  agent: (label: string) => get<AgentDetail>(`/api/agents/${encodeURIComponent(label)}`),
+  agent: (label: string) => get<AgentDetailPlus>(`/api/agents/${encodeURIComponent(label)}`),
+  agentBrain: (label: string) => get<AgentBrainView>(`/api/agents/${encodeURIComponent(label)}/brain`),
+  agentInference: (label: string) => get<InferenceReceipt[]>(`/api/agents/${encodeURIComponent(label)}/inference`),
   createAgent: (body: CreateAgentRequest) => post<AgentSummary>("/api/agents", body),
 
   hire: (body: HireRequest) => post<HireResponse>("/api/hires", body),
   rate: (hireId: string, rating: number) => post<RateResponse>(`/api/hires/${encodeURIComponent(hireId)}/rate`, { rating }),
   getHire: (hireId: string) => get<HireView>(`/api/hires/${encodeURIComponent(hireId)}`),
+
+  tasks: () => get<TaskDetail[]>("/api/tasks"),
+  task: (id: string) => get<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`),
+  taskTemplates: () => get<TaskTemplate[]>("/api/tasks/templates"),
+  createTask: (body: CreateTaskRequest) => post<TaskDetail>("/api/tasks", body),
+  hireForTask: (id: string, specialist: string) => post<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}/hire`, { specialist }),
+  refundTask: (id: string) => post<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}/refund`),
+  createDuel: (body: CreateDuelRequest) => post<DuelDetail>("/api/duels", body),
+  duel: (id: string) => get<DuelDetail>(`/api/duels/${encodeURIComponent(id)}`),
+  verifierHealth: () => get<VerifierHealth>("/api/verifier/health"),
+
+  spend: () => get<SpendStateView>("/api/me/spend"),
+  connectNamera: (body: ConnectNameraRequest) => post<SpendPolicyView>("/api/me/spend/connect", body),
+  disconnectNamera: () => request<{ ok: boolean }>("/api/me/spend", { method: "DELETE" }),
+  tryOverspend: () => post<TryOverspendResponse>("/api/me/spend/try-overspend"),
 
   arenaState: () => get<ArenaState>("/api/arena/state"),
   runOpenAttack: () => post<ArenaState>("/api/arena/open/run"),

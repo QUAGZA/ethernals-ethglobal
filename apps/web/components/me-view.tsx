@@ -14,6 +14,7 @@ import { ExtLink } from "./ext-link";
 import { HireTable } from "./hire-table";
 import { PageHeading, Panel, Stat } from "./page-heading";
 import { SignInGate } from "./sign-in-gate";
+import { SpendingCard } from "./spending-card";
 import { useToast } from "./toast-provider";
 
 /** A newer server may add the buyer's hires to GET /api/me; not in the shared type yet. */
@@ -162,6 +163,8 @@ function MeDashboard({ me }: { me: MeWithHires }) {
             <EmptyNote>No buyer agent yet. It is created when you sign up; if it is missing, ask the server operator to check the logs.</EmptyNote>
           )}
         </Panel>
+
+        <SpendingCard demoMode={Boolean(config?.demoMode)} />
 
         {config?.demoMode && <PassControls me={me} />}
       </section>

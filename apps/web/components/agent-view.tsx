@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { useDebounced, useInterval, useLoad } from "@/lib/hooks";
 import { useEvents } from "@/lib/use-events";
 import { AgentGrid } from "./agent-card";
+import { BrainPanel } from "./brain-panel";
 import { EnsPanel } from "./ens-panel";
 import { EmptyNote, ErrorNotice } from "./error-notice";
 import { ExtLink } from "./ext-link";
@@ -25,7 +26,7 @@ export function AgentView({ label }: { label: string }) {
     (message) => {
       if (agent && message.data.agentEnsName === agent.ensName) refresh();
     },
-    ["hire.delivered", "hire.recorded", "hire.payment_not_verified", "ens.updated", "subhire.blocked"],
+    ["hire.delivered", "hire.recorded", "hire.payment_not_verified", "ens.updated", "subhire.blocked", "task.settled"],
   );
   useInterval(() => void detail.reload(), 20_000);
 
@@ -77,6 +78,10 @@ export function AgentView({ label }: { label: string }) {
       <section className="grid grid-cols-2 gap-[18px] px-[2.2vw] pt-[3vw] max-md:grid-cols-1 max-md:px-5 max-md:pt-8">
         <EnsPanel key={agent.ensName} ensName={agent.ensName} ledgerScore={agent.score} />
         <LedgerPanel agent={agent} />
+      </section>
+
+      <section className="px-[2.2vw] pt-[18px] max-md:px-5">
+        <BrainPanel agent={agent} />
       </section>
 
       <section className="px-[2.2vw] pt-[18px] max-md:px-5">
