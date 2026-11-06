@@ -299,7 +299,12 @@ If that fails with a TLS or connection error from every machine you try, tell th
 
 The server creates each agent's key as Private and pins every call to Private mode. If no sealed provider is free, 0G answers 503 and the agent's call fails. It never falls back to a weaker provider.
 
-**Namera: spending limits.** Follow `docs/proof-of-work/NAMERA-SETUP.md`, then paste the three values on `/me`. You can skip this: people who don't connect use the weaker server-side limits.
+**Namera: spending limits.** You can skip this: people who don't connect use the weaker server-side limits.
+
+1. Sign up at dashboard.namera.ai and create an account (a smart account).
+2. Create a session key for **Ethereum Sepolia** with a tUSDC limit and an expiry, allowing the tUSDC and TaskEscrow contracts, then approve its installation.
+3. Create an API key that can read wallets and session keys and run executions.
+4. Paste the API key, wallet id and session key id into **Connect Namera**, on `/me` or in the hire form.
 
 **The verifier and the escrow.**
 

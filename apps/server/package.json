@@ -12,6 +12,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
     "@ethernals/shared": "workspace:*",
+    "@namera-ai/sdk": "^1.8.0",
     "@worldcoin/idkit-core": "^4.6.0",
     "@x402/core": "^2.30.0",
     "@x402/express": "^2.30.0",

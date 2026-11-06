@@ -15,6 +15,7 @@ import {
 } from "@ethernals/shared";
 import { createSellerAgent, ensureBuyerAgent } from "./agents";
 import { getArenaState, runEthernalsAttack, runOpenAttack } from "./arena";
+import { assistantsAllowedFor, checkAssistantBudget, MAX_ASSISTANTS } from "./assistants";
 import { agentReceipts, brainSettingsView, brainView, currentModelId, updateBrainSettings } from "./brain";
 import { assertPublicUrl, listMcpTools } from "./agent-tools";
 import { adoptAgentsFor } from "./adopt";
@@ -186,7 +187,7 @@ const hireSchema = z.object({
   agent: z.string().min(1),
   input: z.string().min(1).max(8000),
   translateTo: z.enum(["hi", "mr"]).nullish(),
-  consent: z.object({ forward: z.boolean(), subBudget: z.string() }),
+  consent: z.object({ forward: z.boolean(), subBudget: z.string(), maxAssistants: z.number().int().min(0).max(MAX_ASSISTANTS).default(0) }),
 });
 const rateSchema = z.object({
   rating: z.number().int().min(1).max(5),
@@ -359,7 +360,11 @@ export function createApi(): Router {
       policy = await guard.policy();
     } catch (err) {
       if (err instanceof AppError) throw err;
-      throw badRequest("Namera did not accept those details.", "Check the API key, wallet id and session key id in your Namera dashboard.");
+      log.error("reading a Namera session key failed", err);
+      throw new AppError(502, "Could not read that session key from Namera.", (err as Error).message.split("\n")[0]);
+    }
+    if (policy.status !== "active") {
+      throw badRequest(`This session key is ${policy.status === "unknown" ? "not installed yet" : policy.status}.`, "In dashboard.namera.ai, approve its installation on Sepolia, then connect it again.");
     }
     upsertSpendAccount({
       person_id: person.id,
@@ -505,6 +510,11 @@ export function createApi(): Router {
     const buyer = listAgentsOfPerson(person.id).find((a) => a.kind === "buyer" && !a.arena_role);
     if (!buyer) throw new AppError(409, "Your buyer agent is still being created.", "Wait a few seconds and try again, or open /me.");
     const target = body.agent.includes(".") ? body.agent : `${body.agent}.${config.ens.parent()}`;
+    if (body.consent.maxAssistants) {
+      if (body.translateTo) throw badRequest("Pick assistants or the translate option, not both.");
+      if (!assistantsAllowedFor(target)) throw badRequest("Only text agents can hire assistants.");
+      await checkAssistantBudget(person, buyer, body.consent);
+    }
     const result = await hireAsAgent({
       buyer,
       targetEnsName: target,
@@ -519,6 +529,7 @@ export function createApi(): Router {
       paymentTxId: result.paymentTxId,
       paymentUrl: result.paymentUrl,
       subHire: result.subHire,
+      assistants: result.assistants,
     };
     res.json(response);
   });

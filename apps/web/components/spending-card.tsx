@@ -1,23 +1,18 @@
 "use client";
 
-import { useCallback, useState, type FormEvent } from "react";
+import { useCallback, useState } from "react";
 import type { SpendEventView } from "@ethernals/shared";
 import { api, toApiError, type ApiRequestError } from "@/lib/api";
 import { shortHex } from "@/lib/format";
 import { useLoad } from "@/lib/hooks";
 import { ErrorNotice } from "./error-notice";
-import { ExtLink } from "./ext-link";
+import { NameraForm } from "./namera-step";
 import { Panel, Stat } from "./page-heading";
-import { FIELD, SECONDARY_BUTTON, SpendEvents, PRIMARY_BUTTON } from "./task-bits";
-import { useToast } from "./toast-provider";
-
-const SETUP_GUIDE = "https://github.com/shravikamhatre/ethernals-ethglobal/blob/main/docs/proof-of-work/NAMERA-SETUP.md";
+import { SECONDARY_BUTTON, SpendEvents } from "./task-bits";
 
 export function SpendingCard({ demoMode }: { demoMode: boolean }) {
-  const toast = useToast();
   const loader = useCallback(() => api.spend(), []);
   const spend = useLoad(loader, "spend");
-  const [form, setForm] = useState({ apiKey: "", walletId: "", sessionKeyId: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiRequestError | null>(null);
   const [probe, setProbe] = useState<SpendEventView | null>(null);
@@ -33,15 +28,6 @@ export function SpendingCard({ demoMode }: { demoMode: boolean }) {
     } finally {
       setBusy(false);
     }
-  }
-
-  function connect(e: FormEvent) {
-    e.preventDefault();
-    void run(async () => {
-      await api.connectNamera(form);
-      setForm({ apiKey: "", walletId: "", sessionKeyId: "" });
-      toast("Namera connected.");
-    });
   }
 
   const state = spend.data;
@@ -67,26 +53,7 @@ export function SpendingCard({ demoMode }: { demoMode: boolean }) {
             Your agent funds bounties with its own key, and only this server checks its limits. Connect Namera and a session key with an on-chain
             policy decides what it may spend instead.
           </p>
-          <form className="mt-4 flex flex-col gap-3" onSubmit={connect}>
-            <label className="eyebrow block">
-              API key
-              <input className={FIELD} type="password" autoComplete="off" required value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
-            </label>
-            <label className="eyebrow block">
-              Wallet id
-              <input className={FIELD} autoComplete="off" required value={form.walletId} onChange={(e) => setForm({ ...form, walletId: e.target.value })} />
-            </label>
-            <label className="eyebrow block">
-              Session key id
-              <input className={FIELD} autoComplete="off" required value={form.sessionKeyId} onChange={(e) => setForm({ ...form, sessionKeyId: e.target.value })} />
-            </label>
-            <div className="flex flex-wrap items-center gap-4">
-              <button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
-                CONNECT NAMERA →
-              </button>
-              <ExtLink href={SETUP_GUIDE}>Setup guide</ExtLink>
-            </div>
-          </form>
+          <NameraForm className="mt-4" onConnected={() => void spend.reload()} />
         </>
       )}
       <div className="mt-4 flex flex-wrap gap-3">

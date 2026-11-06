@@ -11,6 +11,7 @@ import { useInterval } from "@/lib/hooks";
 import { useEvents } from "@/lib/use-events";
 import { ErrorNotice } from "./error-notice";
 import { ExtLink, LedgerLink, PaymentLink } from "./ext-link";
+import { NameraStep } from "./namera-step";
 import { ProgressNote, type ProgressStep } from "./progress-note";
 import { ReasonBadge } from "./reason-badge";
 import { SignInLink } from "./sign-in-gate";
@@ -40,6 +41,53 @@ type Snapshot = { score: string; price: string };
 type RateState = "idle" | "sending" | "waiting" | "done";
 
 const fieldClass = "block w-full border-b border-ink bg-transparent py-3 outline-none focus:bg-white/60";
+const MAX_ASSISTANTS = 3;
+const SERVER_LIMIT_USDC = "1.00";
+
+/** Code-fix agents work on a posted task with hidden tests, so they have no free-text form. */
+function CodeFixHire({ agent, signedIn }: { agent: AgentDetail; signedIn: boolean | undefined }) {
+  return (
+    <section className="border">
+      <header className="eyebrow flex items-center justify-between border-b px-5 py-3.5">
+        <span className="font-medium">Hire {agent.ensName}</span>
+        <span className="normal-case tracking-normal">{shortUsdc(agent.price)} USDC attempt fee</span>
+      </header>
+      {agent.remote ? (
+        <div className="flex flex-col gap-3 px-5 py-5 leading-[1.6]">
+          <p className="m-0 max-w-[620px]">
+            This agent runs on another server, and that server has no public address yet, so it can&apos;t be hired from here. Its provider needs to
+            run <code>pnpm dev:public</code> on that machine.
+          </p>
+        </div>
+      ) : signedIn === undefined ? (
+        <p className="eyebrow m-0 px-5 py-5 opacity-60">Checking your session…</p>
+      ) : !signedIn ? (
+        <div className="px-5 py-5">
+          <SignInLink next={`/agents/${agent.label}`} />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-5 px-5 py-5">
+          <p className="m-0 max-w-[620px] leading-[1.6]">
+            This agent fixes code, so it works on a posted task, not on free text. You lock a bounty in escrow and hidden tests decide whether it gets paid.
+          </p>
+          <div className="max-w-[620px]">
+            <p className="eyebrow m-0 mb-2">Step 1 · Spending limits</p>
+            <NameraStep serverLimit="10 tUSDC per bounty" note="This key limits the bounty on-chain, on Sepolia." />
+          </div>
+          <div>
+            <p className="eyebrow m-0 mb-2">Step 2 · The task</p>
+            <Link
+              className="inline-block border border-ink bg-yellow px-5 py-[15px] text-[13px] tracking-[.08em] text-ink hover:bg-ink hover:text-yellow"
+              href={`/tasks/new?specialist=${encodeURIComponent(agent.ensName)}`}
+            >
+              POST A TASK FOR THIS AGENT →
+            </Link>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function Check({ ok }: { ok: boolean | null }) {
   if (ok === null) return <span className="opacity-60">…</span>;
@@ -91,6 +139,8 @@ export function HirePanel({
   const [translate, setTranslate] = useState(false);
   const [forward, setForward] = useState(false);
   const [subBudget, setSubBudget] = useState("0.05");
+  const [useAssistants, setUseAssistants] = useState(false);
+  const [maxAssistants, setMaxAssistants] = useState(1);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [hiringSince, setHiringSince] = useState<number | null>(null);
@@ -111,6 +161,7 @@ export function HirePanel({
 
   const person = me?.person ?? null;
   const isOwner = Boolean(person && person.handle === agent.ownerHandle);
+  const isTextAgent = (agent.taskType === "summarize" || agent.taskType === "translate") && (agent.modelType ?? "text") === "text";
 
   const finalize = useCallback(
     async (view?: HireView) => {
@@ -177,6 +228,7 @@ export function HirePanel({
     } catch (err) {
       return setFormError(`Sub-budget: ${(err as Error).message}`);
     }
+    if (useAssistants && !forward) return setFormError("Assistants need your text, so allow sharing it with them first.");
 
     setResult(null);
     setFinalHire(null);
@@ -193,8 +245,8 @@ export function HirePanel({
       const res = await api.hire({
         agent: agent.label,
         input: text,
-        translateTo: translate ? "hi" : null,
-        consent: { forward, subBudget: subBudget.trim() },
+        translateTo: translate && !useAssistants ? "hi" : null,
+        consent: { forward, subBudget: subBudget.trim(), maxAssistants: useAssistants ? maxAssistants : 0 },
       });
       hireIdRef.current = res.hireId;
       setResult(res);
@@ -246,6 +298,8 @@ export function HirePanel({
 
   const hiring = hiringSince !== null;
 
+  if (agent.taskType === "code-fix") return <CodeFixHire agent={agent} signedIn={me === undefined ? undefined : Boolean(person)} />;
+
   return (
     <div className="grid grid-cols-2 gap-[18px] max-md:grid-cols-1">
       {/* ---- the form ---- */}
@@ -281,13 +335,61 @@ export function HirePanel({
               </span>
             </label>
 
-            <label className="flex cursor-pointer items-start gap-3 leading-[1.5]">
-              <input type="checkbox" className="mt-0.5 size-4 accent-ink" checked={translate} disabled={hiring} onChange={(e) => setTranslate(e.target.checked)} />
-              <span>
-                Also translate to Hindi
-                <span className="block text-[11px] opacity-60">The agent then needs a sub-agent (a translator) for part of the work.</span>
-              </span>
-            </label>
+            {!useAssistants && (
+              <label className="flex cursor-pointer items-start gap-3 leading-[1.5]">
+                <input type="checkbox" className="mt-0.5 size-4 accent-ink" checked={translate} disabled={hiring} onChange={(e) => setTranslate(e.target.checked)} />
+                <span>
+                  Also translate to Hindi
+                  <span className="block text-[11px] opacity-60">The agent then needs a sub-agent (a translator) for part of the work.</span>
+                </span>
+              </label>
+            )}
+
+            {isTextAgent && (
+              <div className="flex flex-col gap-3">
+                <label className="flex cursor-pointer items-start gap-3 leading-[1.5]">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4 accent-ink"
+                    checked={useAssistants}
+                    disabled={hiring}
+                    onChange={(e) => setUseAssistants(e.target.checked)}
+                  />
+                  <span>
+                    Let this agent hire assistants
+                    <span className="block text-[11px] opacity-60">
+                      It can recruit text agents from the marketplace, paying each one over x402 on Hedera from its own account.
+                    </span>
+                  </span>
+                </label>
+                {useAssistants && (
+                  <div className="ml-7 flex flex-col gap-3 border-l border-line pl-4">
+                    <label className="eyebrow block">
+                      Most assistants
+                      <select
+                        className={`${fieldClass} mt-1 text-[13px] normal-case tracking-normal`}
+                        value={maxAssistants}
+                        disabled={hiring}
+                        onChange={(e) => setMaxAssistants(Number(e.target.value))}
+                      >
+                        {Array.from({ length: MAX_ASSISTANTS }, (_, i) => i + 1).map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div>
+                      <p className="eyebrow m-0 mb-2">Spending limits</p>
+                      <NameraStep
+                        serverLimit={`${SERVER_LIMIT_USDC} USDC per hire`}
+                        note="Namera can't sign Hedera payments. Its cap and expiry are checked when the hire starts, then our server holds the agent to your sub-budget."
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <label className="flex cursor-pointer items-start gap-3 leading-[1.5]">
               <input type="checkbox" className="mt-0.5 size-4 accent-ink" checked={forward} disabled={hiring} onChange={(e) => setForward(e.target.checked)} />
@@ -386,6 +488,9 @@ export function HirePanel({
                 {result.result}
               </div>
               <SubHireOutcomeView subHire={result.subHire} />
+              {result.assistants?.map((assistant, i) => (
+                <SubHireOutcomeView key={assistant.hireId ?? i} subHire={assistant} />
+              ))}
 
               <div className={rateState === "done" && !rateError ? "hidden" : "border-t border-line pt-4"}>
                 {rateState === "idle" && (
