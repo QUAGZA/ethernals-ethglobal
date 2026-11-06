@@ -40,7 +40,7 @@ export function SpecialistPicker({ options, value, onChange }: { options: Specia
   return (
     <div className="flex flex-col border-t">
       {options.map((option) => (
-        <label key={option.ensName} className={`grid cursor-pointer grid-cols-[22px_1fr_auto] items-center gap-3 border-b px-3 py-3 ${value === option.ensName ? "bg-yellow" : "hover:bg-white"} ${option.status === "dormant" ? "opacity-50" : ""}`}>
+        <label key={option.ensName} className={`grid cursor-pointer grid-cols-[22px_1fr_auto] items-center gap-3 border-b px-3 py-3 ${value === option.ensName ? "bg-cobalt" : "hover:bg-white"} ${option.status === "dormant" ? "opacity-50" : ""}`}>
           <input type="radio" name="specialist" checked={value === option.ensName} disabled={option.status === "dormant"} onChange={() => onChange(option.ensName)} />
           <span>
             <span className="font-serif text-[20px]">{option.ensName}</span>

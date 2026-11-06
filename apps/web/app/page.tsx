@@ -1,4 +1,3 @@
-import { Arena } from "@/components/arena";
 import { Hero } from "@/components/hero";
 import { Market } from "@/components/market";
 import { Protocol } from "@/components/protocol";
@@ -10,7 +9,6 @@ export default function Home() {
       <Hero />
       <Ticker />
       <Market />
-      <Arena />
       <Protocol />
     </>
   );

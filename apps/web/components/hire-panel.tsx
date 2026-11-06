@@ -59,8 +59,8 @@ function FinalOutcome({ hire, before, after }: { hire: HireView; before: Snapsho
       </p>
       {before && after && (
         <p className="m-0 font-serif text-[26px] leading-[1.2]">
-          score {before.score} → <span className={counted ? "bg-yellow px-1" : ""}>{after.score}</span>, price{" "}
-          {shortUsdc(before.price)} → <span className={counted ? "bg-yellow px-1" : ""}>{shortUsdc(after.price)}</span> USDC
+          score {before.score} → <span className={counted ? "bg-cobalt px-1" : ""}>{after.score}</span>, price{" "}
+          {shortUsdc(before.price)} → <span className={counted ? "bg-cobalt px-1" : ""}>{shortUsdc(after.price)}</span> USDC
         </p>
       )}
       <span className="flex flex-wrap gap-x-4 gap-y-1">
@@ -336,7 +336,7 @@ export function HirePanel({
             <button
               type="submit"
               disabled={hiring}
-              className="cursor-pointer border border-ink bg-yellow px-5 py-[15px] text-[13px] tracking-[.08em] text-ink hover:bg-ink hover:text-yellow disabled:cursor-not-allowed disabled:opacity-40"
+              className="cursor-pointer border border-ink bg-cobalt px-5 py-[15px] text-[13px] tracking-[.08em] text-ink hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
               {hiring ? "HIRING…" : `HIRE FOR ${shortUsdc(agent.price)} USDC →`}
             </button>
@@ -386,7 +386,7 @@ export function HirePanel({
                     <div className="flex flex-wrap items-center gap-4">
                       <StarRating value={rating} onChange={setRating} />
                       <button
-                        className="cursor-pointer border border-ink px-5 py-3 hover:bg-yellow disabled:cursor-not-allowed disabled:opacity-40"
+                        className="cursor-pointer border border-ink px-5 py-3 hover:bg-cobalt disabled:cursor-not-allowed disabled:opacity-40"
                         disabled={rating < 1}
                         onClick={() => void submitRating()}
                       >

@@ -37,7 +37,7 @@ function Timeline({ task }: { task: TaskDetail }) {
   return (
     <ol className="m-0 grid list-none grid-cols-5 border p-0 max-md:grid-cols-1">
       {rows.map((row) => (
-        <li key={row.label} className={`border-r px-4 py-3 last:border-r-0 max-md:border-r-0 max-md:border-b ${row.done ? "bg-yellow text-ink" : "opacity-50"}`}>
+        <li key={row.label} className={`border-r px-4 py-3 last:border-r-0 max-md:border-r-0 max-md:border-b ${row.done ? "bg-cobalt text-ink" : "opacity-50"}`}>
           <p className="eyebrow m-0 font-medium">{row.label}</p>
           <ExtLink href={row.href} className="text-[11px]">
             Etherscan

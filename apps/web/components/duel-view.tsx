@@ -18,7 +18,7 @@ import { useSpecialists } from "./task-new-view";
 const DEFAULT_BOUNTY = "2.00";
 
 function Outcome({ task }: { task: TaskDetail }) {
-  if (task.status === "passed") return <p className="display-heading m-0 bg-yellow px-4 py-3 text-[clamp(48px,6vw,88px)] text-ink">PAID</p>;
+  if (task.status === "passed") return <p className="display-heading m-0 bg-cobalt px-4 py-3 text-[clamp(48px,6vw,88px)] text-ink">PAID</p>;
   if (task.status === "failed" || task.status === "refunded") {
     return <p className="display-heading m-0 bg-[#333] px-4 py-3 text-[clamp(48px,6vw,88px)] text-paper">REFUNDED</p>;
   }
@@ -39,7 +39,7 @@ function DuelColumn({ task }: { task: TaskDetail }) {
       {task.error && <ErrorNotice error={{ message: task.error }} />}
       {task.scoreChange?.after && (
         <p className="m-0 text-[20px]">
-          Score {task.scoreChange.before ?? "?"} → <strong className="text-yellow">{task.scoreChange.after}</strong>
+          Score {task.scoreChange.before ?? "?"} → <strong className="text-cobalt">{task.scoreChange.after}</strong>
         </p>
       )}
       <VerifierConsole lines={log.lines} status={log.status} finished={isFinished(task.status)} tall />

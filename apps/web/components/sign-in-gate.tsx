@@ -7,10 +7,10 @@ import { useApp } from "@/lib/app-context";
 import { ErrorNotice } from "./error-notice";
 
 /** Link to /signup that brings the person back here afterwards. */
-export function SignInLink({ next, children = "SIGN IN WITH WORLD ID →" }: { next?: string; children?: ReactNode }) {
+export function SignInLink({ next, children = "CONTINUE WITH WORLD ID →" }: { next?: string; children?: ReactNode }) {
   const href = next ? `/signup?next=${encodeURIComponent(next)}` : "/signup";
   return (
-    <Link href={href} className="inline-block border border-ink bg-yellow px-5 py-[15px] text-ink hover:bg-ink hover:text-yellow">
+    <Link href={href} className="inline-block border border-ink bg-cobalt px-5 py-[15px] text-ink hover:bg-ink hover:text-white">
       {children}
     </Link>
   );
@@ -31,7 +31,16 @@ export function SignInGate({
   if (!me.person) {
     return (
       <div className="flex flex-col items-start gap-4 px-[2.2vw] py-[3vw] max-md:px-5 max-md:py-8">
-        <ErrorNotice error={meError} title="Could not check your session" onRetry={() => void refreshMe()} />
+        {meError && (meError.status === 0 || meError.status >= 500 ? (
+          <p className="m-0 text-[11px] opacity-60">
+            Session check unavailable while the server is offline; retrying.{" "}
+            <button className="cursor-pointer border-b" onClick={() => void refreshMe()}>
+              Retry now
+            </button>
+          </p>
+        ) : (
+          <ErrorNotice error={meError} title="Could not check your session" onRetry={() => void refreshMe()} />
+        ))}
         <p className="m-0 max-w-[520px] text-[14px] leading-[1.6]">{reason}</p>
         <SignInLink next={next} />
       </div>
