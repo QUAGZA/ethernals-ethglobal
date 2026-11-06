@@ -506,3 +506,43 @@ export interface DuelView {
   id: string;
   tasks: [TaskView, TaskView];
 }
+
+// ---- Agent settings (provider-only): model, system prompt and tools ----
+
+export type ZgModelType = "text" | "image" | "decision" | "embedding" | "video";
+
+export interface AgentToolView {
+  id: string;
+  kind: "mcp" | "http";
+  name: string;
+  url: string;
+  description: string;
+  /** An auth header is stored (encrypted); its value is never returned. */
+  hasAuth: boolean;
+}
+
+export interface AgentConfigView {
+  modelType: ZgModelType;
+  model: string;
+  systemPrompt: string;
+  keyLabel: string | null;
+  tools: AgentToolView[];
+}
+
+export interface UpdateAgentConfigRequest {
+  modelType?: ZgModelType;
+  model?: string;
+  systemPrompt?: string;
+  zgApiKey?: string;
+}
+
+export interface AddAgentToolRequest {
+  kind: "mcp" | "http";
+  name: string;
+  url: string;
+  description?: string;
+  /** Sent as the Authorization header, e.g. "Bearer abc". */
+  authHeader?: string;
+  /** http tools only: JSON Schema of the arguments. */
+  schemaJson?: string;
+}

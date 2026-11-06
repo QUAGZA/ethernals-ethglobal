@@ -15,12 +15,14 @@ import {
 } from "@ethernals/shared";
 import { createSellerAgent, ensureBuyerAgent } from "./agents";
 import { getArenaState, runEthernalsAttack, runOpenAttack } from "./arena";
-import { agentReceipts, brainView, currentModelId } from "./brain";
+import { agentReceipts, brainSettingsView, brainView, currentModelId, updateBrainSettings } from "./brain";
+import { assertPublicUrl, listMcpTools } from "./agent-tools";
 import { hireAsAgent } from "./buyer";
 import { config } from "./config";
-import { createSessionToken, randomId, readSessionToken } from "./crypto";
+import { createSessionToken, encryptSecret, randomId, readSessionToken } from "./crypto";
 import {
   countHires,
+  deleteAgentTool,
   deleteSpendAccount,
   findPersonByHandle,
   findPersonByNullifier,
@@ -31,6 +33,7 @@ import {
   getHire,
   getPerson,
   getTask,
+  insertAgentTool,
   insertPerson,
   listAgents,
   listAgentsOfPerson,
@@ -139,6 +142,24 @@ const createAgentSchema = z.object({
   taskType: z.enum(["summarize", "translate", "code-fix"]),
   basePrice: z.string().min(1),
   description: z.string().max(200).optional(),
+  zgApiKey: z.string().trim().regex(/^sk-\S{8,}$/, "A 0G key starts with sk-.").max(300).optional(),
+  modelType: z.enum(["text", "image", "decision", "embedding", "video"]).optional(),
+  model: z.string().trim().max(120).optional(),
+  systemPrompt: z.string().max(4000).optional(),
+});
+const updateConfigSchema = z.object({
+  modelType: z.enum(["text", "image", "decision", "embedding", "video"]).optional(),
+  model: z.string().trim().min(1).max(120).optional(),
+  systemPrompt: z.string().max(4000).optional(),
+  zgApiKey: z.string().trim().regex(/^sk-\S{8,}$/, "A 0G key starts with sk-.").max(300).optional(),
+});
+const addToolSchema = z.object({
+  kind: z.enum(["mcp", "http"]),
+  name: z.string().trim().min(1).max(60),
+  url: z.string().trim().url().max(500),
+  description: z.string().max(500).optional(),
+  authHeader: z.string().max(600).optional(),
+  schemaJson: z.string().max(8000).optional(),
 });
 const hireSchema = z.object({
   agent: z.string().min(1),
@@ -336,6 +357,62 @@ export function createApi(): Router {
 
   r.get("/api/agents/:label/inference", (req, res) => {
     res.json(agentReceipts(agentByName(String(req.params.label))));
+  });
+
+  // Provider-only settings: model, system prompt, own key, MCP and HTTP tools.
+  const ownedAgent = (req: Request) => {
+    const person = requirePerson(req);
+    const agent = agentByName(String(req.params.label));
+    if (agent.person_id !== person.id) throw forbidden("Only the agent's owner can change its settings.");
+    return agent;
+  };
+  r.get("/api/agents/:label/config", (req, res) => {
+    res.json(brainSettingsView(ownedAgent(req)));
+  });
+  r.put("/api/agents/:label/config", (req, res) => {
+    const agent = ownedAgent(req);
+    updateBrainSettings(agent, updateConfigSchema.parse(req.body));
+    res.json(brainSettingsView(agent));
+  });
+  r.post("/api/agents/:label/tools", async (req, res) => {
+    const agent = ownedAgent(req);
+    const body = addToolSchema.parse(req.body);
+    try {
+      assertPublicUrl(body.url);
+    } catch (err) {
+      throw badRequest((err as Error).message);
+    }
+    const row = {
+      id: randomId("tool"),
+      agent_key: agent.key,
+      kind: body.kind,
+      name: body.name,
+      url: body.url,
+      description: body.description?.trim() ?? "",
+      schema_json: body.schemaJson?.trim() || null,
+      auth_enc: body.authHeader?.trim() ? encryptSecret(body.authHeader.trim()) : null,
+    };
+    if (body.kind === "http" && row.schema_json) {
+      try {
+        JSON.parse(row.schema_json);
+      } catch {
+        throw badRequest("The argument schema is not valid JSON.");
+      }
+    }
+    if (body.kind === "mcp") {
+      try {
+        await listMcpTools(row); // prove the server answers before saving it
+      } catch (err) {
+        throw badRequest(`Could not reach that MCP server: ${(err as Error).message}`, "It must speak MCP over Streamable HTTP at a public URL.");
+      }
+    }
+    insertAgentTool(row);
+    res.json(brainSettingsView(agent));
+  });
+  r.delete("/api/agents/:label/tools/:id", (req, res) => {
+    const agent = ownedAgent(req);
+    if (!deleteAgentTool(String(req.params.id), agent.key)) throw notFound("No such tool.");
+    res.json(brainSettingsView(agent));
   });
 
   r.post("/api/agents", async (req, res) => {

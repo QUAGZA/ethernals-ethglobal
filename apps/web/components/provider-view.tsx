@@ -34,6 +34,10 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
   const [taskType, setTaskType] = useState<TaskType>("summarize");
   const [basePrice, setBasePrice] = useState("0.10");
   const [description, setDescription] = useState("");
+  const [zgApiKey, setZgApiKey] = useState("");
+  const [modelType, setModelType] = useState<"text" | "image" | "decision" | "embedding" | "video">("text");
+  const [model, setModel] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [error, setError] = useState<ApiRequestError | null>(null);
   const [since, setSince] = useState<number | null>(null);
@@ -64,6 +68,7 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
     } catch (err) {
       return setFormError((err as Error).message);
     }
+    if (modelType !== "text" && !model.trim()) return setFormError("Enter the 0G model name for a non-text agent.");
     setSince(Date.now());
     setLive(null);
     spinUp.reset();
@@ -73,11 +78,17 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
         taskType,
         basePrice: basePrice.trim(),
         description: description.trim() || undefined,
+        zgApiKey: zgApiKey.trim() || undefined,
+        modelType,
+        model: model.trim() || undefined,
+        systemPrompt: systemPrompt.trim() || undefined,
       });
       setCreated(agent);
       onCreated(agent);
       setLabel("");
       setDescription("");
+      setZgApiKey("");
+      setSystemPrompt("");
     } catch (err) {
       setError(toApiError(err));
     } finally {
@@ -133,6 +144,49 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
             <input className={fieldClass} inputMode="decimal" value={basePrice} disabled={busy} onChange={(e) => setBasePrice(e.target.value)} />
           </label>
         </div>
+        <div className="grid grid-cols-2 gap-5">
+          <label className="eyebrow block">
+            0G model type
+            <select className={`${fieldClass} cursor-pointer`} value={modelType} disabled={busy} onChange={(e) => setModelType(e.target.value as typeof modelType)}>
+              <option value="text">Text · /chat/completions</option>
+              <option value="image">Image · /images/generations</option>
+              <option value="decision">Decision · /decisions</option>
+              <option value="embedding">Embedding · /embeddings</option>
+              <option value="video">Video · /videos</option>
+            </select>
+          </label>
+          <label className="eyebrow block">
+            Model name{modelType === "text" ? " (optional)" : ""}
+            <input className={fieldClass} value={model} disabled={busy} spellCheck={false} placeholder="from GET /v1/models" onChange={(e) => setModel(e.target.value)} />
+          </label>
+        </div>
+        <label className="eyebrow block">
+          System prompt (optional)
+          <textarea
+            className={`${fieldClass} h-20 resize-y`}
+            placeholder="How this agent should think and answer…"
+            maxLength={4000}
+            value={systemPrompt}
+            disabled={busy}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+          />
+        </label>
+        <label className="eyebrow block">
+          0G API key (optional, sk-…)
+          <input
+            className={fieldClass}
+            type="password"
+            placeholder="sk-… this agent's own 0G Router key"
+            autoComplete="off"
+            spellCheck={false}
+            value={zgApiKey}
+            disabled={busy}
+            onChange={(e) => setZgApiKey(e.target.value)}
+          />
+          <span className="mt-1 block normal-case tracking-normal opacity-60">
+            Stored encrypted on the server. This agent's inference runs on it. Blank = shared platform key.
+          </span>
+        </label>
         <label className="eyebrow block">
           Description (optional)
           <textarea

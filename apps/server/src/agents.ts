@@ -30,6 +30,10 @@ interface CreateOptions {
   publishEns?: boolean;
   arenaRole?: string | null;
   strategy?: AgentRow["strategy"];
+  zgApiKey?: string;
+  modelType?: "text" | "image" | "decision" | "embedding" | "video";
+  model?: string;
+  systemPrompt?: string;
   onStep?: (msg: string) => void;
 }
 
@@ -94,7 +98,7 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
     updateAgent(key, { ledger_registered: 1 });
     born(ensName, "ledger", "HireLedger ✓");
     step("Spinning up its brain on 0G Compute...");
-    await spinUpBrain(agent);
+    await spinUpBrain(agent, { ownKey: opts.zgApiKey, modelType: opts.modelType, model: opts.model, systemPrompt: opts.systemPrompt });
     if (opts.taskType === "code-fix") await spinUpOnSepolia(agent);
     agent = getAgentByLabel(opts.label)!;
   }
@@ -159,6 +163,10 @@ export async function createSellerAgent(
     description,
     startingUnits: parseUnits6(config.hedera.sellerStartingUsdc),
     strategy,
+    zgApiKey: req.zgApiKey?.trim() || undefined,
+    modelType: req.modelType,
+    model: req.model?.trim() || undefined,
+    systemPrompt: req.systemPrompt?.trim() || undefined,
     onStep,
   });
 }

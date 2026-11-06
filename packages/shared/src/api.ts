@@ -146,6 +146,14 @@ export interface CreateAgentRequest {
   taskType: TaskType;
   basePrice: string; // e.g. "0.10"
   description?: string;
+  /** Optional: this agent's own 0G Router key (sk-...). Stored encrypted on the server, never returned. */
+  zgApiKey?: string;
+  /** The 0G model family: text (default), image, decision, embedding or video. */
+  modelType?: "text" | "image" | "decision" | "embedding" | "video";
+  /** 0G Router model name. Required for non-text types; text defaults to the platform pick. */
+  model?: string;
+  /** The agent's own system prompt. */
+  systemPrompt?: string;
 }
 
 export interface Consent {
