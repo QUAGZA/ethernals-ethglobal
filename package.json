@@ -21,7 +21,11 @@
     "ens:sync": "pnpm --filter @ethernals/server exec tsx scripts/ens-sync.ts",
     "arena:prepare": "pnpm --filter @ethernals/server exec tsx scripts/arena-prepare.ts",
     "agent:hire": "pnpm --filter @ethernals/server exec tsx scripts/agent-hire.ts",
-    "demo:reset": "pnpm --filter @ethernals/server exec tsx scripts/demo-reset.ts"
+    "demo:reset": "pnpm --filter @ethernals/server exec tsx scripts/demo-reset.ts",
+    "deploy:escrow": "pnpm --filter @ethernals/verifier exec tsx scripts/deploy-escrow.ts",
+    "verifier:setup": "pnpm --filter @ethernals/verifier exec tsx scripts/setup.ts",
+    "verifier:image": "pnpm --filter @ethernals/verifier run image",
+    "verifier:dev": "pnpm --filter @ethernals/verifier dev"
   },
   "devDependencies": {
     "concurrently": "^10.0.0"

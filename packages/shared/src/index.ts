@@ -5,3 +5,5 @@ export * from "./links";
 export * from "./erc8004";
 export * from "./api";
 export * from "./hire-ledger-abi";
+export * from "./task-escrow-abi";
+export * from "./tasks";

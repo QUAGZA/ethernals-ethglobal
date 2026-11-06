@@ -21,7 +21,7 @@ interface CreateOptions {
   person: PersonRow;
   label: string;
   kind: "seller" | "buyer";
-  taskType: "summarize" | "translate" | null;
+  taskType: "summarize" | "translate" | "code-fix" | null;
   basePriceUnits: bigint;
   description: string;
   startingUnits?: bigint;
