@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-mono: var(--font-dm-mono), monospace;
+  --font-serif: var(--font-instrument-serif), serif;
+}
+
+@theme {
+  --color-yellow: #f5df36;
+  --color-ink: #111;
+  --color-paper: #f7f6f1;
+  --color-line: rgb(17 17 17 / 0.23);
+
+  /* Reason badge tones (reasonTone in @ethernals/shared). */
+  --color-good: #1f8a4c;
+  --color-warn: #f0a202;
+  --color-bad: #d62828;
+
+  --breakpoint-md: 50rem;
+
+  --animate-marquee: marquee 28s linear infinite;
+  --animate-flash: flash 1.4s ease-out;
+  --animate-pulse-dot: pulse-dot 1.2s ease-in-out infinite;
+
+  @keyframes marquee {
+    to {
+      transform: translateX(-40%);
+    }
+  }
+
+  /* Animates from the highlight back to the element's own colors. */
+  @keyframes flash {
+    from {
+      background-color: var(--color-yellow);
+      color: var(--color-ink);
+    }
+  }
+
+  @keyframes pulse-dot {
+    50% {
+      opacity: 0.25;
+    }
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    line-height: normal;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  /* Preflight zeroes paragraph margins; the layout relies on the default. */
+  p {
+    margin-block: 1em;
+  }
+}
+
+/* Small uppercase mono label used above sections, panels and fields. */
+@utility eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* The oversized serif used by every section heading. */
+@utility display-heading {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  line-height: 0.78;
+  letter-spacing: -0.055em;
+}
