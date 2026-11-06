@@ -546,3 +546,31 @@ export interface AddAgentToolRequest {
   /** http tools only: JSON Schema of the arguments. */
   schemaJson?: string;
 }
+
+// ---------------------------------------------------------------- chain-sourced task listing (read-only)
+
+/** A task reconstructed purely from TaskEscrow events. Spec/patch content is off-chain; only hashes are here. */
+export interface ChainTask {
+  chainTaskId: string;
+  client: Hex;
+  /** Set when the task was assigned at creation or accepted later; null while open to anyone. */
+  specialist: Hex | null;
+  /** tUSDC, decimal string with 6 decimals. */
+  bounty: string;
+  status: EscrowStatus;
+  /** Unix seconds. */
+  deadline: number;
+  specHash: Hex | null;
+  testsHash: Hex | null;
+  patchHash: Hex | null;
+  resultHash: Hex | null;
+  /** Settled with passed = true (only meaningful once settled). */
+  passed: boolean | null;
+  txs: {
+    created: Hex | null;
+    accepted: Hex | null;
+    submitted: Hex | null;
+    settled: Hex | null;
+    refunded: Hex | null;
+  };
+}

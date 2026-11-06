@@ -29,7 +29,8 @@ import {
   type EnsKey,
 } from "@ethernals/shared";
 import { config, normalizeEcdsaKey, writeEnvValue } from "./config";
-import { countSpecialistTasks, getAgent, getBrain, updateAgent, updateHire, type AgentRow } from "./db";
+import { countSpecialistTasks, getAgent, getBrain, listAgentTools, updateAgent, updateHire, type AgentRow } from "./db";
+import { decryptSecret, encryptSecret } from "./crypto";
 import { emit, log } from "./events";
 import { getStats } from "./ledger";
 import { SerialQueue } from "./queue";
@@ -235,6 +236,7 @@ export function initialRecords(agent: AgentRow, providerKeyShort: string): Recor
       records[ENS_KEYS.brain] = `0g-router:${brain.model}`;
       records[ENS_KEYS.earned] = "0.00";
     }
+    Object.assign(records, configRecords(agent));
     if (agent.task_type === "code-fix") {
       Object.assign(records, {
         [ENS_KEYS.capabilities]: "code-fix:python",
@@ -248,6 +250,55 @@ export function initialRecords(agent: AgentRow, providerKeyShort: string): Recor
     }
   }
   return records;
+}
+
+/**
+ * The agent's setup as ENS records, so it survives any one server: a public JSON config, plus its API key and tool
+ * auth encrypted with the platform root secret (only a host holding the same KEYSTORE_SECRET can read them).
+ */
+export function configRecords(agent: AgentRow): Record<string, string> {
+  const brain = getBrain(agent.key);
+  const tools = listAgentTools(agent.key);
+  const config_ = {
+    v: 1,
+    modelType: brain?.model_type ?? "text",
+    model: brain?.model ?? null,
+    systemPrompt: brain?.system_prompt ?? "",
+    tools: tools.map((t) => ({ kind: t.kind, name: t.name, url: t.url, description: t.description, schema: t.schema_json })),
+  };
+  const toolAuth: Record<string, string> = {};
+  for (const t of tools) if (t.auth_enc) toolAuth[t.name] = decryptSecret(t.auth_enc);
+  const secrets = { zgApiKey: brain?.api_key_enc ? decryptSecret(brain.api_key_enc) : null, toolAuth };
+  const hasSecrets = secrets.zgApiKey || Object.keys(toolAuth).length > 0;
+  return {
+    [ENS_KEYS.config]: JSON.stringify(config_),
+    [ENS_KEYS.secrets]: hasSecrets ? encryptSecret(JSON.stringify(secrets)) : "",
+  };
+}
+
+const configTimers = new Map<string, NodeJS.Timeout>();
+
+/** After the provider changes settings or tools: republish the config (debounced, one transaction). */
+export function queueConfigPublish(agent: AgentRow, delayMs = 4_000): void {
+  const existing = configTimers.get(agent.key);
+  if (existing) clearTimeout(existing);
+  configTimers.set(
+    agent.key,
+    setTimeout(() => {
+      configTimers.delete(agent.key);
+      void setRecords(agent.ens_name, { ...configRecords(agent), [ENS_KEYS.updated]: new Date().toISOString() })
+        .then((hash) => emit("ens.updated", { agentEnsName: agent.ens_name, message: `${agent.ens_name} config published in ENS`, ensUrl: sepoliaTxUrl(hash) }))
+        .catch((err) => log.error(`ENS config publish failed for ${agent.ens_name}`, err));
+    }, delayMs),
+  );
+}
+
+/** Points the agent's ENS endpoint at this server ("host it here"). */
+export async function publishEndpoint(agent: AgentRow): Promise<Hex> {
+  return setRecords(agent.ens_name, {
+    [ENS_KEYS.endpoint]: `${config.publicBaseUrl}/a/${agent.label}/task`,
+    [ENS_KEYS.updated]: new Date().toISOString(),
+  });
 }
 
 function agentContext(agent: AgentRow): string {
@@ -349,6 +400,7 @@ export async function syncEndpoints(agents: AgentRow[], onStep: (msg: string) =>
       [ENS_KEYS.endpoint]: `${config.publicBaseUrl}/a/${agent.label}/task`,
       [ENS_KEYS.label]: agent.label,
       [ENS_KEYS.hedera]: agent.hedera_account_id,
+      ...(agent.kind === "seller" ? configRecords(agent) : {}),
       [ENS_KEYS.ledger]: `hedera:testnet:${config.hedera.ledgerAddressOrNull() ?? "not-deployed"}`,
       [ENS_KEYS.updated]: new Date().toISOString(),
     });

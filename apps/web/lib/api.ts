@@ -3,6 +3,7 @@
  * rewrites /api/* to the server, and the session is an HTTP-only cookie.
  */
 import type {
+  ChainTask,
   AgentDetail,
   AgentSummary,
   ApiError,
@@ -151,6 +152,7 @@ export const api = {
   agentInference: (label: string) => get<InferenceReceipt[]>(`/api/agents/${encodeURIComponent(label)}/inference`),
   agentConfig: (label: string) => get<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/config`),
   updateAgentConfig: (label: string, body: UpdateAgentConfigRequest) => put<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/config`, body),
+  hostHere: (label: string) => post<{ ok: boolean; endpoint: string }>(`/api/agents/${encodeURIComponent(label)}/host-here`),
   addAgentTool: (label: string, body: AddAgentToolRequest) => post<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/tools`, body),
   deleteAgentTool: (label: string, id: string) => del<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/tools/${encodeURIComponent(id)}`),
   createAgent: (body: CreateAgentRequest) => post<AgentSummary>("/api/agents", body),
@@ -160,6 +162,7 @@ export const api = {
   getHire: (hireId: string) => get<HireView>(`/api/hires/${encodeURIComponent(hireId)}`),
 
   tasks: () => get<TaskDetail[]>("/api/tasks"),
+  chainTasks: () => get<ChainTask[]>("/api/tasks/chain"),
   task: (id: string) => get<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`),
   taskTemplates: () => get<TaskTemplate[]>("/api/tasks/templates"),
   createTask: (body: CreateTaskRequest) => post<TaskDetail>("/api/tasks", body),

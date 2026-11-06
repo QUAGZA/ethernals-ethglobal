@@ -60,9 +60,9 @@ export interface NewAccount {
  * Creates a new ECDSA account by sending HBAR to its key alias (auto account creation),
  * then associates USDC so it can send and receive the payment token.
  */
-export async function createAgentAccount(initialHbar = Number(config.hedera.agentStartingHbar)): Promise<NewAccount> {
+export async function createAgentAccount(initialHbar = Number(config.hedera.agentStartingHbar), privateKeyHex?: string): Promise<NewAccount> {
   const client = operatorClient();
-  const key = PrivateKey.generateECDSA();
+  const key = privateKeyHex ? PrivateKey.fromStringECDSA(privateKeyHex.replace(/^0x/, "")) : PrivateKey.generateECDSA();
   const alias = key.publicKey.toAccountId(0, 0);
   const operatorId = AccountId.fromString(config.hedera.operatorId());
 
@@ -240,4 +240,10 @@ export async function verifyPaymentOnMirror(params: {
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** The EVM address a Hedera account is keyed to (from the mirror node), or null when it does not exist. */
+export async function accountEvmAddress(accountId: string): Promise<string | null> {
+  const data = await mirrorJson<{ evm_address?: string; key?: { key?: string } }>(`/api/v1/accounts/${accountId}`);
+  return data?.evm_address ? data.evm_address.toLowerCase() : null;
 }

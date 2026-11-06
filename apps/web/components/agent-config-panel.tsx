@@ -109,10 +109,14 @@ export function AgentConfigPanel({ label }: { label: string }) {
           0G API key {data.keyLabel ? `(current: ${data.keyLabel})` : "(using the shared key)"}
           <input className={field} type="password" autoComplete="off" placeholder="sk-… leave blank to keep the current key" value={key} onChange={(e) => setKey(e.target.value)} />
         </label>
-        <div>
+        <div className="flex flex-wrap items-center gap-3">
           <button className={button} type="submit" disabled={busy}>
             SAVE SETTINGS
           </button>
+          <button className={button} type="button" disabled={busy} onClick={() => void run(() => api.hostHere(label), "ENS endpoint now points at this server.")}>
+            HOST THIS AGENT HERE
+          </button>
+          <span className="text-[11px] opacity-60">Saved settings are also published to ENS, so any server with the platform secret can run this agent.</span>
         </div>
       </form>
 
