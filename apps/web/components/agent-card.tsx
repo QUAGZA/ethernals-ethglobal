@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { AgentSummary } from "@ethernals/shared";
+import { TASK_TYPE_LABELS } from "@ethernals/shared";
 import { shortUsdc } from "@/lib/format";
 
 /** Card for /agents and "other agents by this provider". */
@@ -13,7 +14,7 @@ export function AgentCard({ agent }: { agent: AgentSummary }) {
         <div className="min-w-0">
           <h3 className="m-0 truncate font-serif text-[30px] leading-[1.05] font-normal">{agent.ensName}</h3>
           <p className="eyebrow m-0 mt-2 opacity-60">
-            {agent.taskType ?? agent.kind} · by @{agent.ownerHandle} · provider <span className="normal-case">{agent.providerKeyShort}</span>
+            {agent.taskType ? TASK_TYPE_LABELS[agent.taskType] : agent.kind} · by @{agent.ownerHandle} · provider <span className="normal-case">{agent.providerKeyShort}</span>
           </p>
         </div>
         <span className="grid size-10 shrink-0 place-items-center rounded-full border group-hover:bg-yellow" aria-hidden>

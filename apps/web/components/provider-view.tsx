@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useState, type FormEvent } from "react";
 import type { AgentSummary, HireView, MeResponse, TaskType } from "@ethernals/shared";
+import { DEFAULT_MEDIA_MODELS, modelTypeFor, TASK_TYPE_LABELS, TASK_TYPES } from "@ethernals/shared";
 import { LABEL_REGEX, ensAppUrl, parseUnits6 } from "@ethernals/shared";
 import { api, toApiError, type ApiRequestError } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
@@ -35,7 +36,6 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
   const [basePrice, setBasePrice] = useState("0.10");
   const [description, setDescription] = useState("");
   const [zgApiKey, setZgApiKey] = useState("");
-  const [modelType, setModelType] = useState<"text" | "image" | "decision" | "embedding" | "video">("text");
   const [model, setModel] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -68,7 +68,6 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
     } catch (err) {
       return setFormError((err as Error).message);
     }
-    if (modelType !== "text" && !model.trim()) return setFormError("Enter the 0G model name for a non-text agent.");
     setSince(Date.now());
     setLive(null);
     spinUp.reset();
@@ -79,7 +78,7 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
         basePrice: basePrice.trim(),
         description: description.trim() || undefined,
         zgApiKey: zgApiKey.trim() || undefined,
-        modelType,
+        modelType: modelTypeFor(taskType),
         model: model.trim() || undefined,
         systemPrompt: systemPrompt.trim() || undefined,
       });
@@ -134,9 +133,11 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
                 if (next === "code-fix") setBasePrice("0.05");
               }}
             >
-              <option value="summarize">summarize</option>
-              <option value="translate">translate</option>
-              <option value="code-fix">Code fix (Python)</option>
+              {TASK_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {TASK_TYPE_LABELS[type]}
+                </option>
+              ))}
             </select>
           </label>
           <label className="eyebrow block">
@@ -144,22 +145,20 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
             <input className={fieldClass} inputMode="decimal" value={basePrice} disabled={busy} onChange={(e) => setBasePrice(e.target.value)} />
           </label>
         </div>
-        <div className="grid grid-cols-2 gap-5">
-          <label className="eyebrow block">
-            0G model type
-            <select className={`${fieldClass} cursor-pointer`} value={modelType} disabled={busy} onChange={(e) => setModelType(e.target.value as typeof modelType)}>
-              <option value="text">Text · /chat/completions</option>
-              <option value="image">Image · /images/generations</option>
-              <option value="decision">Decision · /decisions</option>
-              <option value="embedding">Embedding · /embeddings</option>
-              <option value="video">Video · /videos</option>
-            </select>
-          </label>
-          <label className="eyebrow block">
-            Model name{modelType === "text" ? " (optional)" : ""}
-            <input className={fieldClass} value={model} disabled={busy} spellCheck={false} placeholder="from GET /v1/models" onChange={(e) => setModel(e.target.value)} />
-          </label>
-        </div>
+        <label className="eyebrow block">
+          0G model (optional)
+          <input
+            className={fieldClass}
+            value={model}
+            disabled={busy}
+            spellCheck={false}
+            placeholder={modelTypeFor(taskType) === "text" ? "from GET /v1/models" : DEFAULT_MEDIA_MODELS[modelTypeFor(taskType) as "image" | "video"]}
+            onChange={(e) => setModel(e.target.value)}
+          />
+          {modelTypeFor(taskType) !== "text" && (
+            <span className="mt-1 block normal-case tracking-normal opacity-60">Every request to this model costs real money from your 0G balance.</span>
+          )}
+        </label>
         <label className="eyebrow block">
           System prompt (optional)
           <textarea

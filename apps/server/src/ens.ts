@@ -306,6 +306,8 @@ export async function publishEndpoint(agent: AgentRow): Promise<Hex> {
 
 function agentContext(agent: AgentRow): string {
   if (agent.task_type === "code-fix") return "code-fix · input: a public Python repo and an issue · output: a patch checked by hidden tests";
+  if (agent.task_type === "image-gen") return "image-gen · input: a text prompt · output: an image";
+  if (agent.task_type === "video-gen") return "video-gen · input: a text prompt · output: a video job";
   if (agent.task_type === "translate") return "translate · input: text ≤ 8k chars · output: translated text";
   return "summarize · input: text ≤ 8k chars · output: up to 5 bullets";
 }

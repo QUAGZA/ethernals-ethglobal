@@ -44,7 +44,25 @@ const fieldClass = "block w-full border-b border-ink bg-transparent py-3 outline
 const MAX_ASSISTANTS = 3;
 const SERVER_LIMIT_USDC = "1.00";
 
-/** Code-fix agents work on a posted task with hidden tests, so they have no free-text form. */
+const isImage = (line: string) => /^(data:image\/|https:\/\/)/.test(line);
+
+/** Image agents answer with one image per line: a link or embedded data. Anything else is shown as text. */
+function ResultBody({ agent, result }: { agent: AgentDetail; result: string }) {
+  const lines = result.split("\n").filter(Boolean);
+  if (agent.taskType === "image-gen" && lines.length > 0 && lines.every(isImage)) {
+    return (
+      <div className="flex flex-col gap-3">
+        {lines.map((src, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={i} src={src} alt={`Generated result ${i + 1}`} className="max-h-[420px] w-full border border-line object-contain" />
+        ))}
+      </div>
+    );
+  }
+  return <div className="max-h-[340px] overflow-y-auto border border-line bg-white/70 px-4 py-3 text-[13px] leading-[1.6] whitespace-pre-wrap">{result}</div>;
+}
+
+/** Code gen agents work on a posted task with hidden tests, so they have no free-text form. */
 function CodeFixHire({ agent, signedIn }: { agent: AgentDetail; signedIn: boolean | undefined }) {
   return (
     <section className="border">
@@ -68,7 +86,7 @@ function CodeFixHire({ agent, signedIn }: { agent: AgentDetail; signedIn: boolea
       ) : (
         <div className="flex flex-col gap-5 px-5 py-5">
           <p className="m-0 max-w-[620px] leading-[1.6]">
-            This agent fixes code, so it works on a posted task, not on free text. You lock a bounty in escrow and hidden tests decide whether it gets paid.
+            This agent writes code, so it works on a posted task, not on free text. You lock a bounty in escrow and hidden tests decide whether it gets paid.
           </p>
           <div className="max-w-[620px]">
             <p className="eyebrow m-0 mb-2">Step 1 · Spending limits</p>
@@ -162,6 +180,7 @@ export function HirePanel({
   const person = me?.person ?? null;
   const isOwner = Boolean(person && person.handle === agent.ownerHandle);
   const isTextAgent = (agent.taskType === "summarize" || agent.taskType === "translate") && (agent.modelType ?? "text") === "text";
+  const isMediaAgent = agent.taskType === "image-gen" || agent.taskType === "video-gen";
 
   const finalize = useCallback(
     async (view?: HireView) => {
@@ -321,10 +340,10 @@ export function HirePanel({
         ) : (
           <form className="flex flex-col gap-5 px-5 py-5" onSubmit={submitHire}>
             <label className="eyebrow block">
-              Task text
+              {isMediaAgent ? "Prompt" : "Task text"}
               <textarea
                 className={`${fieldClass} mt-1 h-40 resize-y text-[13px] normal-case tracking-normal`}
-                placeholder={agent.taskType === "translate" ? "Text to translate…" : "Paste the text you want summarized…"}
+                placeholder={isMediaAgent ? `Describe the ${agent.taskType === "image-gen" ? "image" : "video"} you want…` : agent.taskType === "translate" ? "Text to translate…" : "Paste the text you want summarized…"}
                 value={input}
                 maxLength={MAX_INPUT + 200}
                 disabled={hiring}
@@ -335,7 +354,7 @@ export function HirePanel({
               </span>
             </label>
 
-            {!useAssistants && (
+            {!useAssistants && !isMediaAgent && (
               <label className="flex cursor-pointer items-start gap-3 leading-[1.5]">
                 <input type="checkbox" className="mt-0.5 size-4 accent-ink" checked={translate} disabled={hiring} onChange={(e) => setTranslate(e.target.checked)} />
                 <span>
@@ -391,26 +410,30 @@ export function HirePanel({
               </div>
             )}
 
-            <label className="flex cursor-pointer items-start gap-3 leading-[1.5]">
-              <input type="checkbox" className="mt-0.5 size-4 accent-ink" checked={forward} disabled={hiring} onChange={(e) => setForward(e.target.checked)} />
-              <span>
-                Allow this agent to share my data with a sub-agent
-                <span className="block text-[11px] opacity-60">
-                  Off by default. When off, our code blocks any attempt to send your text to another agent.
-                </span>
-              </span>
-            </label>
+            {!isMediaAgent && (
+              <>
+                <label className="flex cursor-pointer items-start gap-3 leading-[1.5]">
+                  <input type="checkbox" className="mt-0.5 size-4 accent-ink" checked={forward} disabled={hiring} onChange={(e) => setForward(e.target.checked)} />
+                  <span>
+                    Allow this agent to share my data with a sub-agent
+                    <span className="block text-[11px] opacity-60">
+                      Off by default. When off, our code blocks any attempt to send your text to another agent.
+                    </span>
+                  </span>
+                </label>
 
-            <label className="eyebrow block">
-              Sub-budget (USDC the agent may spend on sub-hires)
-              <input
-                className={`${fieldClass} mt-1 text-[13px] normal-case tracking-normal`}
-                inputMode="decimal"
-                value={subBudget}
-                disabled={hiring}
-                onChange={(e) => setSubBudget(e.target.value)}
-              />
-            </label>
+                <label className="eyebrow block">
+                  Sub-budget (USDC the agent may spend on sub-hires)
+                  <input
+                    className={`${fieldClass} mt-1 text-[13px] normal-case tracking-normal`}
+                    inputMode="decimal"
+                    value={subBudget}
+                    disabled={hiring}
+                    onChange={(e) => setSubBudget(e.target.value)}
+                  />
+                </label>
+              </>
+            )}
 
             {isOwner && (
               <p className="m-0 border-l-[5px] border-warn bg-warn/15 px-4 py-3 leading-[1.5]">
@@ -484,9 +507,7 @@ export function HirePanel({
                 <PaymentLink href={result.paymentUrl} />
                 {!result.paymentUrl && <span className="text-[11px] opacity-60">payment id pending</span>}
               </p>
-              <div className="max-h-[340px] overflow-y-auto border border-line bg-white/70 px-4 py-3 text-[13px] leading-[1.6] whitespace-pre-wrap">
-                {result.result}
-              </div>
+              <ResultBody agent={agent} result={result.result} />
               <SubHireOutcomeView subHire={result.subHire} />
               {result.assistants?.map((assistant, i) => (
                 <SubHireOutcomeView key={assistant.hireId ?? i} subHire={assistant} />

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { AgentSummary, TaskType } from "@ethernals/shared";
+import { TASK_TYPE_LABELS, TASK_TYPES } from "@ethernals/shared";
 import { api } from "@/lib/api";
 import { shortUsdc } from "@/lib/format";
 import { useDebounced, useLoad } from "@/lib/hooks";
@@ -13,11 +14,10 @@ type Filter = "all" | TaskType;
 
 const filters: { value: Filter; label: string }[] = [
   { value: "all", label: "ALL AGENTS" },
-  { value: "summarize", label: "SUMMARIZE" },
-  { value: "translate", label: "TRANSLATE" },
+  ...TASK_TYPES.map((value) => ({ value, label: TASK_TYPE_LABELS[value].toUpperCase() })),
 ];
 
-const glyphs: Record<TaskType, string> = { summarize: "≡", translate: "⇄", "code-fix": "⌘" };
+const glyphs: Record<TaskType, string> = { "image-gen": "▣", "video-gen": "▶", "code-fix": "⌘", summarize: "≡", translate: "⇄" };
 
 function Stat({
   value,
@@ -53,7 +53,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
           </span>
         </h3>
         <p className="mt-[3px] mb-0 truncate text-[9px] opacity-60">
-          {(agent.description || agent.taskType || "agent").toUpperCase()} · BY @{agent.ownerHandle.toUpperCase()}
+          {(agent.description || (agent.taskType && TASK_TYPE_LABELS[agent.taskType]) || "agent").toUpperCase()} · BY @{agent.ownerHandle.toUpperCase()}
         </p>
       </div>
       <Stat className="max-md:hidden" value={`${agent.score} / 5.00`} label={`SCORE · ${agent.votes} ${agent.votes === 1 ? "VOTE" : "VOTES"}`} />

@@ -139,6 +139,8 @@ async function scanNames(): Promise<string[]> {
 function taskTypeOf(capabilities: string | null, context: string | null): string | null {
   const text = `${capabilities ?? ""} ${context ?? ""}`;
   if (text.includes("code-fix")) return "code-fix";
+  if (text.includes("image-gen")) return "image-gen";
+  if (text.includes("video-gen")) return "video-gen";
   if (/^\s*translate|translate ·/.test(text)) return "translate";
   if (/summarize/.test(text)) return "summarize";
   return null;

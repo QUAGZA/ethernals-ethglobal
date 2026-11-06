@@ -7,6 +7,7 @@ await vi.hoisted(async () => {
 
 const { brainView, chooseModel, clearModelCache, creditEarnings, costOf, createAgentKey, currentModelId, extractLastJson, isDormant, loadModels, neuronForEarnings, setRetryDelayForTests, spinUpBrain, think } = await import("../src/brain");
 const { getBrain, listReceipts, upsertBrain } = await import("../src/db");
+const { encryptSecret } = await import("../src/crypto");
 const { agentGate } = await import("../src/gate");
 const { recentEvents } = await import("../src/events");
 const { agent, person } = await import("./_fixtures");
@@ -133,7 +134,6 @@ describe("think", () => {
   });
 
   it("falls back to the shared key when the agent's own key is refused", async () => {
-    const { encryptSecret } = await import("../src/crypto");
     const seller = agent(person());
     upsertBrain({ agent_key: seller.key, api_key_enc: encryptSecret("sk-own"), key_label: seller.ens_name, model: "0gm-1.0-35b-a3b", credit_neuron: "1000", spent_neuron: "0", earned_units: "0", credited_from_earnings_neuron: "0", last_request_id: null });
     const calls = stubRouter((_url, init) => ((init?.headers as Record<string, string>).authorization === "Bearer sk-own" ? new Response("no", { status: 401 }) : chat("ok")));
@@ -218,5 +218,45 @@ describe("self-funding", () => {
     const next = vi.fn();
     agentGate({ params: { label: seller.label } } as never, res as never, next);
     expect(next).toHaveBeenCalled();
+  });
+});
+
+describe("image and video agents", () => {
+  const media = (modelType: "image" | "video", model: string) => {
+    const seller = agent(person(), { task_type: modelType === "image" ? "image-gen" : "video-gen" });
+    upsertBrain({ agent_key: seller.key, api_key_enc: encryptSecret("sk-own"), key_label: seller.ens_name, model, model_type: modelType, credit_neuron: "1000", spent_neuron: "0", earned_units: "0", credited_from_earnings_neuron: "0", last_request_id: null } as never);
+    return seller;
+  };
+  const answer = (body: object) => () => new Response(JSON.stringify({ id: "job-1", usage: { prompt_tokens: 1, completion_tokens: 0 }, ...body }));
+
+  it("sends a video to /videos without the private header, because no video model has a TEE provider", async () => {
+    const calls = stubRouter(answer({ status: "queued" }));
+    const { text } = await think(media("video", "bytedance/seedance-2.0-mini"), { purpose: "video-gen", messages });
+    const call = calls.find((c) => c.url.endsWith("/videos"))!;
+    expect(trustMode(call)).toBeUndefined();
+    expect(JSON.parse(String(call.init?.body))).toEqual({ model: "bytedance/seedance-2.0-mini", prompt: "hi" });
+    expect(text).toMatch(/job-1/);
+  });
+
+  it("returns the image, and keeps a TEE-backed image model private", async () => {
+    const calls = stubRouter(answer({ data: [{ url: "https://cdn.test/a.png" }] }));
+    const { text } = await think(media("image", "cheap"), { purpose: "image-gen", messages });
+    expect(text).toBe("https://cdn.test/a.png");
+    expect(trustMode(calls.find((c) => c.url.endsWith("/images/generations"))!)).toBe("private");
+  });
+
+  it("leaves an image model without a TEE provider on standard providers", async () => {
+    const calls = stubRouter(answer({ data: [{ b64_json: "AAAA" }] }));
+    const { text } = await think(media("image", "open"), { purpose: "image-gen", messages });
+    expect(text).toBe("data:image/png;base64,AAAA");
+    expect(trustMode(calls.find((c) => c.url.endsWith("/images/generations"))!)).toBeUndefined();
+  });
+
+  it("gives media agents a standard key", async () => {
+    process.env.ZG_MANAGEMENT_KEY = "mk-admin";
+    const calls = stubRouter(() => new Response(JSON.stringify({ key: "sk-agent" })));
+    await spinUpBrain(agent(person(), { task_type: "video-gen" }), { modelType: "video", model: "bytedance/seedance-2.0-mini" });
+    process.env.ZG_MANAGEMENT_KEY = "";
+    expect(JSON.parse(String(calls.find((c) => c.url.endsWith("/api-keys"))!.init?.body)).trust_mode).toBe("standard");
   });
 });

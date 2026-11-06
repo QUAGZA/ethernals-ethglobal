@@ -297,7 +297,9 @@ If that fails with a TLS or connection error from every machine you try, tell th
 4. Go to API Keys. Create a key with the trust mode set to **Private**, and paste it into `ZG_API_KEY`. Agents use it if they can't get their own.
 5. Set `ZG_NETWORK` and `ZG_ROUTER_BASE_URL` to match your console. If you set `ZG_MODEL`, pick a model listed as `TeeML`.
 
-The server creates each agent's key as Private and pins every call to Private mode. If no sealed provider is free, 0G answers 503 and the agent's call fails. It never falls back to a weaker provider.
+The server creates each text agent's key as Private and pins every text call to Private mode. If no sealed provider is free, 0G answers 503 and the agent's call fails. It never falls back to a weaker provider.
+
+Image and video agents get a standard key, because no video model has a sealed provider. They need `ZG_MANAGEMENT_KEY` or their own key: a Private `ZG_API_KEY` can't reach them. Each request costs real money.
 
 **Namera: spending limits.** You can skip this: people who don't connect use the weaker server-side limits.
 

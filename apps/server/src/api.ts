@@ -12,6 +12,9 @@ import {
   type SpendStateView,
   type StatsResponse,
   type TryOverspendResponse,
+  modelTypeFor,
+  TASK_TYPE_LABELS,
+  TASK_TYPES,
 } from "@ethernals/shared";
 import { createSellerAgent, ensureBuyerAgent } from "./agents";
 import { getArenaState, runEthernalsAttack, runOpenAttack } from "./arena";
@@ -161,7 +164,7 @@ function taskById(id: string) {
 const verifySchema = z.object({ handle: z.string(), proof: z.unknown() });
 const createAgentSchema = z.object({
   label: z.string().min(1),
-  taskType: z.enum(["summarize", "translate", "code-fix"]),
+  taskType: z.enum(TASK_TYPES),
   basePrice: z.string().min(1),
   description: z.string().max(200).optional(),
   zgApiKey: z.string().trim().regex(/^sk-\S{8,}$/, "A 0G key starts with sk-.").max(300).optional(),
@@ -440,7 +443,11 @@ export function createApi(): Router {
   });
   r.put("/api/agents/:label/config", (req, res) => {
     const agent = ownedAgent(req);
-    updateBrainSettings(agent, updateConfigSchema.parse(req.body));
+    const settings = updateConfigSchema.parse(req.body);
+    if (settings.modelType && agent.task_type && settings.modelType !== modelTypeFor(agent.task_type)) {
+      throw badRequest(`A ${TASK_TYPE_LABELS[agent.task_type]} agent can't use a ${settings.modelType} model.`);
+    }
+    updateBrainSettings(agent, settings);
     queueConfigPublish(agent);
     res.json(brainSettingsView(agent));
   });

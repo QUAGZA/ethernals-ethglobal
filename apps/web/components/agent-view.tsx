@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback } from "react";
-import { ensAppUrl } from "@ethernals/shared";
+import { ensAppUrl, TASK_TYPE_LABELS } from "@ethernals/shared";
 import { api } from "@/lib/api";
 import { useDebounced, useInterval, useLoad } from "@/lib/hooks";
 import { useEvents } from "@/lib/use-events";
@@ -63,7 +63,7 @@ export function AgentView({ label }: { label: string }) {
   return (
     <>
       <PageHeading
-        eyebrow={`Agent · ${agent.taskType ?? agent.kind} · by @${agent.ownerHandle}`}
+        eyebrow={`Agent · ${agent.taskType ? TASK_TYPE_LABELS[agent.taskType] : agent.kind} · by @${agent.ownerHandle}`}
         title={<span className="break-all">{agent.ensName}</span>}
         aside={
           <div className="flex flex-col items-end gap-2 text-right max-md:items-start max-md:text-left">
@@ -100,7 +100,7 @@ export function AgentView({ label }: { label: string }) {
 
       {isOwner && (
         <section className="px-[2.2vw] pt-[18px] max-md:px-5">
-          <AgentConfigPanel label={agent.label} />
+          <AgentConfigPanel label={agent.label} taskType={agent.taskType} />
         </section>
       )}
 
