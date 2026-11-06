@@ -19,7 +19,8 @@ import {
 } from "@ethernals/shared";
 import { providerKeyShort } from "./agents";
 import { config } from "./config";
-import { getAgent, getPerson, listAgentsOfPerson, listHiresForAgent, type AgentRow, type HireRow, type PersonRow } from "./db";
+import { parseTools } from "./custom-agent";
+import { getAgent, getAgentBrain, getPerson, listAgentsOfPerson, listHiresForAgent, type AgentRow, type HireRow, type PersonRow } from "./db";
 import { getStats, type LedgerStats } from "./ledger";
 
 const statsCache = new Map<string, { stats: LedgerStats; at: number }>();
@@ -62,6 +63,10 @@ export async function agentView(agent: AgentRow): Promise<AgentSummary> {
     kind: agent.kind,
     taskType: agent.task_type,
     description: agent.description,
+    brain: (() => {
+      const b = agent.task_type === "custom" ? getAgentBrain(agent.key) : undefined;
+      return b ? { provider: b.provider, model: b.model, tools: parseTools(b.tools_json), specialization: b.system_prompt } : null;
+    })(),
     ownerHandle: owner?.handle ?? "?",
     providerKeyShort: providerKeyShort(agent.person_id),
     hederaAccountId: agent.hedera_account_id,

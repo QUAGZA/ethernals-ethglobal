@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useState, type FormEvent } from "react";
-import type { AgentSummary, HireView, MeResponse, TaskType } from "@ethernals/shared";
-import { LABEL_REGEX, ensAppUrl, parseUnits6 } from "@ethernals/shared";
+import type { AgentSummary, AgentToolId, HireView, MeResponse, TaskType } from "@ethernals/shared";
+import { AGENT_TOOLS, LABEL_REGEX, ensAppUrl, parseUnits6 } from "@ethernals/shared";
 import { api, toApiError, type ApiRequestError } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
 import { useDebounced, useLoad } from "@/lib/hooks";
@@ -25,6 +25,13 @@ const CREATE_STEPS: ProgressStep[] = [
   { at: 55, text: "Almost there. Sepolia can be slow…" },
 ];
 
+const TOOL_HELP: Record<AgentToolId, string> = {
+  calculator: "Exact arithmetic instead of the model guessing numbers.",
+  fetch_url: "Read a public https web page or JSON (private networks are blocked).",
+  current_time: "Know the current date and time.",
+  hire_agent: "Pay other agents on the marketplace for sub-tasks, only if the customer allows it and within their sub-budget.",
+};
+
 const fieldClass = "mt-1 block w-full border-b border-ink bg-transparent py-3 text-[13px] normal-case tracking-normal outline-none focus:bg-white/60";
 
 function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => void }) {
@@ -38,6 +45,13 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
   const [since, setSince] = useState<number | null>(null);
   const [live, setLive] = useState<string | null>(null);
   const [created, setCreated] = useState<AgentSummary | null>(null);
+  // Custom (hosted) agent: the hoster brings their own 0G key, a specialization and tools.
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [tools, setTools] = useState<AgentToolId[]>([]);
+  const [keyCheck, setKeyCheck] = useState<{ ok: boolean; text: string; models: string[] } | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const ensName = label && config ? `${label}.${config.ensParent}` : null;
 
@@ -48,6 +62,19 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
       setLive(message.data.message ?? message.type);
     }
   });
+
+  async function testKey() {
+    setTesting(true);
+    setKeyCheck(null);
+    try {
+      const r = await api.testBrain({ apiKey: apiKey.trim(), model: model.trim() || undefined });
+      setKeyCheck({ ok: true, text: `Key works. Model ${r.model}, request id ${r.requestId ?? "n/a"}.`, models: r.models });
+    } catch (err) {
+      setKeyCheck({ ok: false, text: toApiError(err).message, models: [] });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -62,6 +89,10 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
     } catch (err) {
       return setFormError((err as Error).message);
     }
+    if (taskType === "custom") {
+      if (!apiKey.trim()) return setFormError("Enter your 0G API key. It pays for this agent's thinking.");
+      if (systemPrompt.trim().length < 20) return setFormError("Describe what this agent is specialized in (at least a sentence).");
+    }
     setSince(Date.now());
     setLive(null);
     try {
@@ -70,11 +101,14 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
         taskType,
         basePrice: basePrice.trim(),
         description: description.trim() || undefined,
+        brain: taskType === "custom" ? { provider: "0g", apiKey: apiKey.trim(), model: model.trim() || undefined, systemPrompt: systemPrompt.trim(), tools } : undefined,
       });
       setCreated(agent);
       onCreated(agent);
       setLabel("");
       setDescription("");
+      setApiKey("");
+      setKeyCheck(null);
     } catch (err) {
       setError(toApiError(err));
     } finally {
@@ -87,7 +121,7 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
   return (
     <section className="border">
       <header className="eyebrow flex items-center justify-between border-b px-5 py-3.5">
-        <span className="font-medium">Create a seller agent</span>
+        <span className="font-medium">Create an agent to host</span>
         <span className="normal-case tracking-normal opacity-70">takes 20–60 s</span>
       </header>
       <form className="flex flex-col gap-5 px-5 py-5" onSubmit={submit}>
@@ -118,6 +152,7 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
             >
               <option value="summarize">summarize</option>
               <option value="translate">translate</option>
+              <option value="custom">custom: my own agent on 0G</option>
             </select>
           </label>
           <label className="eyebrow block">
@@ -125,6 +160,75 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
             <input className={fieldClass} inputMode="decimal" value={basePrice} disabled={busy} onChange={(e) => setBasePrice(e.target.value)} />
           </label>
         </div>
+        {taskType === "custom" && (
+          <div className="flex flex-col gap-5 border bg-white/40 p-4">
+            <p className="m-0 text-[11px] leading-[1.5] opacity-70">
+              You host this agent: it thinks on 0G using <b>your own</b> 0G account, so the inference cost is yours and
+              your earnings are the price customers pay. Your key is checked, stored encrypted on the server, used only
+              to run this agent&apos;s tasks, and is never shown again.
+            </p>
+            <label className="eyebrow block">
+              Your 0G API key (sk-…)
+              <input
+                className={fieldClass}
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="sk-…"
+                value={apiKey}
+                disabled={busy}
+                onChange={(e) => {
+                  setApiKey(e.target.value);
+                  setKeyCheck(null);
+                }}
+              />
+            </label>
+            <label className="eyebrow block">
+              Model (optional)
+              <input className={fieldClass} placeholder="empty = 0gm-1.0-35b-a3b" list="zg-models" value={model} disabled={busy} onChange={(e) => setModel(e.target.value)} />
+              <datalist id="zg-models">
+                {(keyCheck?.models ?? []).map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+            </label>
+            <div>
+              <button type="button" disabled={busy || testing || !apiKey.trim()} onClick={() => void testKey()} className="cursor-pointer border border-ink px-4 py-2 text-[11px] tracking-[.08em] hover:bg-ink hover:text-yellow disabled:cursor-not-allowed disabled:opacity-40">
+                {testing ? "TESTING…" : "TEST KEY + MODEL"}
+              </button>
+              {keyCheck && <p className={`m-0 mt-2 text-[12px] ${keyCheck.ok ? "text-good" : "text-bad"}`}>{keyCheck.text}</p>}
+            </div>
+            <label className="eyebrow block">
+              Specialization (what makes this agent good at its job)
+              <textarea
+                className={`${fieldClass} h-28 resize-y`}
+                placeholder="You are a contract-clause reviewer. Quote the clause, rate its risk low/medium/high, and suggest safer wording."
+                value={systemPrompt}
+                disabled={busy}
+                maxLength={4000}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+              />
+            </label>
+            <fieldset className="m-0 border-0 p-0">
+              <legend className="eyebrow mb-2">Tools</legend>
+              {AGENT_TOOLS.map((t) => (
+                <label key={t} className="mb-1 flex cursor-pointer items-start gap-3 text-[12px] leading-[1.5]">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4 accent-ink"
+                    checked={tools.includes(t)}
+                    disabled={busy}
+                    onChange={(e) => setTools(e.target.checked ? [...tools, t] : tools.filter((x) => x !== t))}
+                  />
+                  <span>
+                    <b>{t}</b>
+                    <span className="block opacity-60">{TOOL_HELP[t]}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          </div>
+        )}
         <label className="eyebrow block">
           Description (optional)
           <textarea
@@ -256,8 +360,9 @@ export function ProviderView() {
   return (
     <>
       <PageHeading eyebrow="Provide · run agents, earn a record" title={<>Earn a record you <em>can&apos;t</em> fake.</>}>
-        Create a seller agent with its own ENS name and Hedera account. Its score and price move only when
-        different verified people pay for it and rate it.
+        Host an agent: give it a specialization and tools and run it on your own 0G account (or pick summarize/translate).
+        It gets its own ENS name and Hedera account. Its score and price move only when different verified people pay
+        for it and rate it.
       </PageHeading>
       <SignInGate next="/provider" reason="Sign in to create agents. Each agent belongs to exactly one verified person.">
         {(_person, me) => <ProviderDashboard me={me} />}

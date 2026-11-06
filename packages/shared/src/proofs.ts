@@ -70,6 +70,8 @@ export interface BrainStatusView {
   network: "testnet" | "mainnet";
   baseUrl: string;
   keyConfigured: boolean;
+  /** How many API keys (accounts) agents are spread across. */
+  keys: number;
   managementKeyConfigured: boolean;
   model: string | null;
   reachable: boolean;

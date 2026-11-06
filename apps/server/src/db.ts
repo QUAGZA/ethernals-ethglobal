@@ -26,7 +26,7 @@ export interface AgentRow {
   evm_address: string;
   enc_private_key: string;
   base_price: string; // atomic units
-  task_type: "summarize" | "translate" | "code-fix" | null;
+  task_type: "summarize" | "translate" | "code-fix" | "custom" | null;
   description: string;
   budget_remaining: string; // atomic units (buyer agents)
   ledger_registered: number;
@@ -179,6 +179,15 @@ function migrate(d: DatabaseSync): void {
       at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS inference_ref ON inference_receipts(ref);
+    CREATE TABLE IF NOT EXISTS agent_brains (
+      agent_key TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      enc_api_key TEXT NOT NULL,
+      model TEXT NOT NULL,
+      system_prompt TEXT NOT NULL,
+      tools_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -437,4 +446,23 @@ export function listInference(limit = 50): InferenceRow[] {
 export function inferenceTotals(): { calls: number; spentNeuron: string } {
   const rows = getDb().prepare("SELECT cost_neuron FROM inference_receipts").all() as unknown as { cost_neuron: string }[];
   return { calls: rows.length, spentNeuron: rows.reduce((s, r) => s + BigInt(r.cost_neuron || "0"), 0n).toString() };
+}
+
+// ---------------------------------------------------------------- hosted agents' brains (the hoster's own 0G key, encrypted)
+export interface AgentBrainRow {
+  agent_key: string;
+  provider: "0g";
+  enc_api_key: string;
+  model: string;
+  system_prompt: string;
+  tools_json: string;
+  created_at: string;
+}
+export function insertAgentBrain(b: Omit<AgentBrainRow, "created_at">): void {
+  getDb()
+    .prepare("INSERT INTO agent_brains (agent_key, provider, enc_api_key, model, system_prompt, tools_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(b.agent_key, b.provider, b.enc_api_key, b.model, b.system_prompt, b.tools_json, new Date().toISOString());
+}
+export function getAgentBrain(agentKey: string): AgentBrainRow | undefined {
+  return getDb().prepare("SELECT * FROM agent_brains WHERE agent_key = ?").get(agentKey) as AgentBrainRow | undefined;
 }

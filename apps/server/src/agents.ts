@@ -5,8 +5,9 @@
 import { namehash } from "viem/ens";
 import { assertValidLabel, formatUnits6, parseUnits6, type CreateAgentRequest } from "@ethernals/shared";
 import { config } from "./config";
+import { testBrainKey } from "./brain";
 import { encryptSecret, personHash, providerKey } from "./crypto";
-import { getAgentByLabel, getAgentByEnsName, insertAgent, listAgentsOfPerson, updateAgent, type AgentRow, type PersonRow } from "./db";
+import { getAgentByLabel, getAgentByEnsName, insertAgent, insertAgentBrain, listAgentsOfPerson, updateAgent, type AgentRow, type PersonRow } from "./db";
 import { agentEnsName, publishAgent } from "./ens";
 import { badRequest, conflict } from "./errors";
 import { emit, log } from "./events";
@@ -21,7 +22,8 @@ interface CreateOptions {
   person: PersonRow;
   label: string;
   kind: "seller" | "buyer";
-  taskType: "summarize" | "translate" | "code-fix" | null;
+  taskType: "summarize" | "translate" | "code-fix" | "custom" | null;
+  brain?: { apiKey: string; model: string; systemPrompt: string; tools: string[] };
   basePriceUnits: bigint;
   description: string;
   startingUnits?: bigint;
@@ -59,6 +61,17 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
     erc8004_agent_id: null,
     arena_role: opts.arenaRole ?? null,
   });
+
+  if (opts.brain) {
+    insertAgentBrain({
+      agent_key: key,
+      provider: "0g",
+      enc_api_key: encryptSecret(opts.brain.apiKey),
+      model: opts.brain.model,
+      system_prompt: opts.brain.systemPrompt,
+      tools_json: JSON.stringify(opts.brain.tools),
+    });
+  }
 
   if (opts.kind === "seller") {
     step("Registering on the HireLedger (Hedera)...");
@@ -108,14 +121,30 @@ export async function createSellerAgent(person: PersonRow, req: CreateAgentReque
     throw badRequest((err as Error).message);
   }
   if (basePrice <= 0n) throw badRequest("Base price must be more than 0.");
+  let brain: CreateOptions["brain"];
+  if (req.taskType === "custom") {
+    const b = req.brain;
+    if (!b || b.provider !== "0g") throw badRequest("A custom agent needs a brain: provider 0g with your own API key.");
+    if (!b.apiKey.trim()) throw badRequest("Enter your 0G API key.");
+    if (b.systemPrompt.trim().length < 20) throw badRequest("Describe what the agent is specialized in (at least a sentence).");
+    if (b.systemPrompt.length > 4000) throw badRequest("The specialization is limited to 4,000 characters.");
+    onStep?.("Checking your 0G key and model...");
+    // Fail before any account is created if the key or model is wrong.
+    const checked = await testBrainKey(b.apiKey.trim(), b.model?.trim() || undefined).catch((err) => {
+      throw badRequest(`Your 0G key or model did not work: ${(err as Error).message}`, (err as { hint?: string }).hint);
+    });
+    brain = { apiKey: b.apiKey.trim(), model: checked.model, systemPrompt: b.systemPrompt.trim(), tools: [...new Set(b.tools)] };
+  }
   const description =
     req.description?.trim() ||
+    (req.taskType === "custom" ? "A specialized agent running on 0G." : "") ||
     (req.taskType === "translate" ? "Translates text into Hindi or Marathi." : "Summarizes text in up to 5 bullet points.");
   return createAgent({
     person,
     label: req.label.trim().toLowerCase(),
     kind: "seller",
     taskType: req.taskType,
+    brain,
     basePriceUnits: basePrice,
     description,
     startingUnits: parseUnits6(config.hedera.sellerStartingUsdc),

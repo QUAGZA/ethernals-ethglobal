@@ -72,6 +72,13 @@ export function AgentView({ label }: { label: string }) {
           Owner @{agent.ownerHandle} · provider key {agent.providerKeyShort}
           {agent.endpoint ? ` · x402 endpoint ${agent.endpoint}` : ""}
         </p>
+        {agent.brain && (
+          <div className="mt-4 max-w-[720px] border p-4 text-[12px] leading-[1.6]">
+            <p className="eyebrow m-0 opacity-60">SPECIALIZATION · RUNS ON 0G · {agent.brain.model}</p>
+            <p className="m-0 mt-2 whitespace-pre-wrap">{agent.brain.specialization}</p>
+            <p className="m-0 mt-2 opacity-70">Tools: {agent.brain.tools.length ? agent.brain.tools.join(", ") : "none"}</p>
+          </div>
+        )}
       </PageHeading>
 
       <section className="grid grid-cols-2 gap-[18px] px-[2.2vw] pt-[3vw] max-md:grid-cols-1 max-md:px-5 max-md:pt-8">
