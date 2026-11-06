@@ -27,6 +27,8 @@ export interface PublicConfig {
   hederaNetwork: "testnet";
   paymentAsset: "USDC" | "HBAR";
   ledgerAddress: string | null;
+  /** The Hedera token id of the payment asset (USDC), for sending funds to a buyer agent. */
+  usdcTokenId?: string;
   /** Added by the proof-of-work build (all optional so older servers still type-check). */
   zeroG?: { enabled: boolean; network: "testnet" | "mainnet"; model: string };
   namera?: { enabled: boolean };

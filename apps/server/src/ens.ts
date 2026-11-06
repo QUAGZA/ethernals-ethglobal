@@ -253,26 +253,29 @@ export function initialRecords(agent: AgentRow, providerKeyShort: string): Recor
 }
 
 /**
- * The agent's setup as ENS records, so it survives any one server: a public JSON config, plus its API key and tool
- * auth encrypted with the platform root secret (only a host holding the same KEYSTORE_SECRET can read them).
+ * The agent's setup as ENS records, so it survives any one server. Nothing readable is published: the model, system
+ * prompt, tools, API key and tool auth are all sealed in ONE blob with the platform root secret (KEYSTORE_SECRET), so
+ * only the creator's servers can read them. The public `ethernals.config` record is cleared.
  */
 export function configRecords(agent: AgentRow): Record<string, string> {
   const brain = getBrain(agent.key);
   const tools = listAgentTools(agent.key);
-  const config_ = {
-    v: 1,
-    modelType: brain?.model_type ?? "text",
-    model: brain?.model ?? null,
-    systemPrompt: brain?.system_prompt ?? "",
-    tools: tools.map((t) => ({ kind: t.kind, name: t.name, url: t.url, description: t.description, schema: t.schema_json })),
-  };
   const toolAuth: Record<string, string> = {};
   for (const t of tools) if (t.auth_enc) toolAuth[t.name] = decryptSecret(t.auth_enc);
-  const secrets = { zgApiKey: brain?.api_key_enc ? decryptSecret(brain.api_key_enc) : null, toolAuth };
-  const hasSecrets = secrets.zgApiKey || Object.keys(toolAuth).length > 0;
+  const sealed = {
+    v: 2,
+    config: {
+      modelType: brain?.model_type ?? "text",
+      model: brain?.model ?? null,
+      systemPrompt: brain?.system_prompt ?? "",
+      tools: tools.map((t) => ({ kind: t.kind, name: t.name, url: t.url, description: t.description, schema: t.schema_json })),
+    },
+    zgApiKey: brain?.api_key_enc ? decryptSecret(brain.api_key_enc) : null,
+    toolAuth,
+  };
   return {
-    [ENS_KEYS.config]: JSON.stringify(config_),
-    [ENS_KEYS.secrets]: hasSecrets ? encryptSecret(JSON.stringify(secrets)) : "",
+    [ENS_KEYS.config]: "",
+    [ENS_KEYS.secrets]: encryptSecret(JSON.stringify(sealed)),
   };
 }
 

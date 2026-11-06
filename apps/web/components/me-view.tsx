@@ -162,6 +162,7 @@ function MeDashboard({ me }: { me: MeWithHires }) {
           ) : (
             <EmptyNote>No buyer agent yet. It is created when you sign up; if it is missing, ask the server operator to check the logs.</EmptyNote>
           )}
+          {buyer && <FundBuyer accountId={buyer.hederaAccountId} tokenId={config?.usdcTokenId} />}
         </Panel>
 
         <SpendingCard demoMode={Boolean(config?.demoMode)} />
@@ -200,5 +201,48 @@ export function MeView() {
         {(_person, current) => <MeDashboard me={current} />}
       </SignInGate>
     </>
+  );
+}
+
+/** Pay from your own wallet: send USDC on Hedera testnet to the buyer agent, then let it spend that balance. */
+function FundBuyer({ accountId, tokenId }: { accountId: string; tokenId?: string }) {
+  const { setMe } = useApp();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiRequestError | null>(null);
+
+  async function sync() {
+    setBusy(true);
+    setError(null);
+    try {
+      setMe(await api.syncBuyerBudget());
+      toast("Budget set to your agent's full USDC balance.");
+    } catch (err) {
+      setError(toApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 border-t pt-5">
+      <p className="eyebrow m-0 mb-2">Pay with your own wallet</p>
+      <p className="m-0 text-[12px] leading-[1.6]">
+        From any Hedera testnet wallet (HashPack, Blade…), send USDC{tokenId ? ` (token ${tokenId})` : ""} to{" "}
+        <b className="break-all">{accountId}</b>. Your buyer agent already accepts it. Every hire is then paid from that
+        balance over x402 on Hedera. Test USDC is free at faucet.circle.com (choose Hedera Testnet).
+      </p>
+      <div className="mt-3">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void sync()}
+          className="cursor-pointer border border-ink bg-yellow px-4 py-2 text-[12px] tracking-[.08em] text-ink hover:bg-ink hover:text-yellow disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? "CHECKING…" : "I SENT USDC: USE MY FULL BALANCE"}
+        </button>
+      </div>
+      <ErrorNotice className="mt-3" error={error} title="Could not update the budget" />
+    </div>
   );
 }

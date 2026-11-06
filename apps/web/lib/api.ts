@@ -152,6 +152,7 @@ export const api = {
   agentInference: (label: string) => get<InferenceReceipt[]>(`/api/agents/${encodeURIComponent(label)}/inference`),
   agentConfig: (label: string) => get<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/config`),
   updateAgentConfig: (label: string, body: UpdateAgentConfigRequest) => put<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/config`, body),
+  syncBuyerBudget: () => post<MeResponse>("/api/me/buyer/sync-budget"),
   hostHere: (label: string) => post<{ ok: boolean; endpoint: string }>(`/api/agents/${encodeURIComponent(label)}/host-here`),
   addAgentTool: (label: string, body: AddAgentToolRequest) => post<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/tools`, body),
   deleteAgentTool: (label: string, id: string) => del<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/tools/${encodeURIComponent(id)}`),
