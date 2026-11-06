@@ -134,6 +134,13 @@ export const config = {
     reputation: str("ERC8004_REPUTATION_REGISTRY", "0x8004B663056A597Dffe9eCcC1965A193B7388713") as `0x${string}`,
   },
 
+  /** Sandbox verifier (apps/verifier) and the Sepolia escrow it settles. */
+  proofs: {
+    verifierUrl: str("VERIFIER_URL", "http://127.0.0.1:4100").replace(/\/+$/, ""),
+    verifierToken: str("VERIFIER_TOKEN"),
+    escrow: (str("TASK_ESCROW_ADDRESS") || null) as `0x${string}` | null,
+  },
+
   arena: {
     fakeReviewers: int("ARENA_FAKE_REVIEWERS", 20),
     farmHires: int("ARENA_FARM_HIRES", 20),

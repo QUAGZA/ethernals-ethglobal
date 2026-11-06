@@ -14,10 +14,14 @@ import type {
   HireResponse,
   HireView,
   MeResponse,
+  ProofView,
   PublicConfig,
   RateResponse,
   RpContext,
+  RunProofRequest,
   StatsResponse,
+  SubcontractRequest,
+  SubcontractResponse,
   WorldVerifyRequest,
 } from "@ethernals/shared";
 
@@ -109,6 +113,10 @@ export const api = {
   hire: (body: HireRequest) => post<HireResponse>("/api/hires", body),
   rate: (hireId: string, rating: number) => post<RateResponse>(`/api/hires/${encodeURIComponent(hireId)}/rate`, { rating }),
   getHire: (hireId: string) => get<HireView>(`/api/hires/${encodeURIComponent(hireId)}`),
+
+  proofs: () => get<ProofView[]>("/api/proofs"),
+  runProof: (body: RunProofRequest) => post<ProofView>("/api/proofs/demo", body),
+  subcontract: (body: SubcontractRequest) => post<SubcontractResponse>("/api/proofs/subcontract", body),
 
   arenaState: () => get<ArenaState>("/api/arena/state"),
   runOpenAttack: () => post<ArenaState>("/api/arena/open/run"),

@@ -145,6 +145,25 @@ function migrate(d: DatabaseSync): void {
       funded INTEGER NOT NULL DEFAULT 0,
       used INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS proofs (
+      id TEXT PRIMARY KEY,
+      agent TEXT NOT NULL,
+      parent_proof_id TEXT,
+      category TEXT NOT NULL,
+      title TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      chain_task_id TEXT,
+      patch_hash TEXT NOT NULL,
+      receipt_json TEXT NOT NULL,
+      receipt_hash TEXT NOT NULL,
+      validator_json TEXT NOT NULL,
+      settlement_status TEXT NOT NULL,
+      settle_tx TEXT,
+      result_url TEXT,
+      log_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS proofs_agent ON proofs(agent);
     CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -323,4 +342,46 @@ export function kvSet(key: string, value: unknown): void {
 /** Wipes hires, mandates and agents (keeps persons). Used by `pnpm demo:reset`. */
 export function resetDemoData(): void {
   getDb().exec("DELETE FROM mandates; DELETE FROM hires; DELETE FROM agents; DELETE FROM arena_wallets; DELETE FROM kv;");
+}
+
+
+// ---------------------------------------------------------------- validation proofs (receipts live here, hashes on-chain)
+export interface ProofRow {
+  id: string;
+  agent: string;
+  parent_proof_id: string | null;
+  category: string;
+  title: string;
+  job_id: string;
+  chain_task_id: string | null;
+  patch_hash: string;
+  receipt_json: string;
+  receipt_hash: string;
+  validator_json: string;
+  settlement_status: "paid" | "refunded" | "none";
+  settle_tx: string | null;
+  result_url: string | null;
+  log_json: string;
+  created_at: string;
+}
+export function insertProof(p: Omit<ProofRow, "created_at">): ProofRow {
+  const created_at = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO proofs (id, agent, parent_proof_id, category, title, job_id, chain_task_id, patch_hash, receipt_json, receipt_hash, validator_json, settlement_status, settle_tx, result_url, log_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(p.id, p.agent, p.parent_proof_id, p.category, p.title, p.job_id, p.chain_task_id, p.patch_hash, p.receipt_json, p.receipt_hash, p.validator_json, p.settlement_status, p.settle_tx, p.result_url, p.log_json, created_at);
+  return { ...p, created_at };
+}
+export function getProof(id: string): ProofRow | undefined {
+  return getDb().prepare("SELECT * FROM proofs WHERE id = ?").get(id) as ProofRow | undefined;
+}
+export function listProofs(limit = 50): ProofRow[] {
+  return getDb().prepare("SELECT * FROM proofs ORDER BY created_at DESC LIMIT ?").all(limit) as unknown as ProofRow[];
+}
+export function listProofsForAgent(agent: string): ProofRow[] {
+  return getDb().prepare("SELECT * FROM proofs WHERE agent = ? ORDER BY created_at DESC").all(agent) as unknown as ProofRow[];
+}
+export function setProofParent(id: string, parentId: string): void {
+  getDb().prepare("UPDATE proofs SET parent_proof_id = ? WHERE id = ?").run(parentId, id);
 }
