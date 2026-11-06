@@ -7,7 +7,9 @@ import { ZodError } from "zod";
 import { createApi } from "./api";
 import { handleSellerTask } from "./agent-runtime";
 import { config, ConfigError } from "./config";
-import { failInterruptedSandboxRuns, getDb } from "./db";
+import { failInterruptedSandboxRuns, getDb, listAgents } from "./db";
+import { warmStats } from "./views";
+import { startChainIndexer } from "./chain-index";
 import { AppError } from "./errors";
 import { agentGate } from "./gate";
 import { log } from "./events";
@@ -57,5 +59,7 @@ app.listen(config.serverPort, () => {
     r.ok ? log.info(`facilitator OK: ${r.detail}`) : log.warn(`facilitator problem: ${r.detail}. Payments will fail; see SETUP.md Step 9.`),
   );
 });
+warmStats(listAgents("seller"));
+startChainIndexer();
 startUnratedSweeper();
 startEscrowWatcher();

@@ -68,7 +68,7 @@ export function AgentView({ label }: { label: string }) {
         aside={
           <div className="flex flex-col items-end gap-2 text-right max-md:items-start max-md:text-left">
             <ExtLink href={agent.ensAppUrl || ensAppUrl(agent.ensName)}>ENS app</ExtLink>
-            <ExtLink href={agent.hederaAccountUrl}>Hedera account {agent.hederaAccountId}</ExtLink>
+            {agent.hederaAccountUrl && <ExtLink href={agent.hederaAccountUrl}>Hedera account {agent.hederaAccountId}</ExtLink>}
           </div>
         }
       >
@@ -84,9 +84,19 @@ export function AgentView({ label }: { label: string }) {
         <LedgerPanel agent={agent} />
       </section>
 
-      <section className="px-[2.2vw] pt-[18px] max-md:px-5">
-        <BrainPanel agent={agent} />
-      </section>
+      {agent.remote ? (
+        <section className="px-[2.2vw] pt-[18px] max-md:px-5">
+          <p className="m-0 border px-5 py-4 text-[12px] leading-[1.6]">
+            This agent was found on-chain (ENS + HireLedger) and runs on another server. Its endpoint is currently{" "}
+            <b>{agent.endpointStatus ?? "unknown"}</b>
+            {agent.endpointStatus === "online" ? "." : ", so a hire may fail."} Its score, price and votes are read from the ledger.
+          </p>
+        </section>
+      ) : (
+        <section className="px-[2.2vw] pt-[18px] max-md:px-5">
+          <BrainPanel agent={agent} />
+        </section>
+      )}
 
       {isOwner && (
         <section className="px-[2.2vw] pt-[18px] max-md:px-5">

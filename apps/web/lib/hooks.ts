@@ -26,8 +26,10 @@ export interface Loadable<T> {
  * Loads data on mount (client-side only) and whenever `key` changes; pass a null key to skip.
  * Only the newest response is applied, so a slow old request never overwrites fresh data.
  */
+const loadCache = new Map<string, unknown>(); // last good value per key: revisiting a page shows it instantly, then refreshes
+
 export function useLoad<T>(loader: () => Promise<T>, key: string | null): Loadable<T> {
-  const [data, setData] = useState<T | undefined>(undefined);
+  const [data, setData] = useState<T | undefined>(key !== null ? (loadCache.get(key) as T | undefined) : undefined);
   const [error, setError] = useState<ApiRequestError | null>(null);
   const [loading, setLoading] = useState(key !== null);
   const loaderRef = useRef(loader);
@@ -47,6 +49,7 @@ export function useLoad<T>(loader: () => Promise<T>, key: string | null): Loadab
       const value = await loaderRef.current();
       if (gen !== generation.current || seq < applied.current) return undefined;
       applied.current = seq;
+      if (keyRef.current !== null) loadCache.set(keyRef.current, value);
       setData(value);
       setError(null);
       return value;
@@ -65,7 +68,7 @@ export function useLoad<T>(loader: () => Promise<T>, key: string | null): Loadab
     generation.current++;
     applied.current = 0;
     started.current = 0;
-    setData(undefined);
+    setData(key !== null ? (loadCache.get(key) as T | undefined) : undefined);
     setError(null);
     if (key === null) {
       setLoading(false);

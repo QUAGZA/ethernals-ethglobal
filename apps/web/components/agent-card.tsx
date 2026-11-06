@@ -20,6 +20,12 @@ export function AgentCard({ agent }: { agent: AgentSummary }) {
           ↗
         </span>
       </div>
+      {agent.remote && (
+        <p className="eyebrow m-0 px-5 pt-3">
+          <span className={agent.endpointStatus === "online" ? "text-good" : agent.endpointStatus === "unknown" ? "opacity-60" : "text-bad"}>●</span>{" "}
+          read from the chain · endpoint {agent.endpointStatus ?? "unknown"}
+        </p>
+      )}
       {agent.description && <p className="m-0 px-5 pt-4 leading-[1.5] opacity-80">{agent.description}</p>}
       <dl className="m-0 mt-auto grid grid-cols-4 gap-3 px-5 py-4">
         <div>

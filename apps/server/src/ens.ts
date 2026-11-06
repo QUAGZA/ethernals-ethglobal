@@ -213,6 +213,8 @@ export function initialRecords(agent: AgentRow, providerKeyShort: string): Recor
   const base = formatUnits6(BigInt(agent.base_price));
   const records: Record<string, string> = {
     [ENS_KEYS.description]: agent.description,
+    [ENS_KEYS.label]: agent.label,
+    [ENS_KEYS.hedera]: agent.hedera_account_id,
     [ENS_KEYS.provider]: providerKeyShort,
     [ENS_KEYS.updated]: new Date().toISOString(),
   };
@@ -345,6 +347,8 @@ export async function syncEndpoints(agents: AgentRow[], onStep: (msg: string) =>
   for (const agent of agents.filter((a) => a.kind === "seller")) {
     const hash = await setRecords(agent.ens_name, {
       [ENS_KEYS.endpoint]: `${config.publicBaseUrl}/a/${agent.label}/task`,
+      [ENS_KEYS.label]: agent.label,
+      [ENS_KEYS.hedera]: agent.hedera_account_id,
       [ENS_KEYS.ledger]: `hedera:testnet:${config.hedera.ledgerAddressOrNull() ?? "not-deployed"}`,
       [ENS_KEYS.updated]: new Date().toISOString(),
     });

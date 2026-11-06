@@ -23,6 +23,8 @@ import { createSessionToken, encryptSecret, randomId, readSessionToken } from ".
 import {
   countHires,
   deleteAgentTool,
+  getChainAgent,
+  listChainAgents,
   deleteSpendAccount,
   findPersonByHandle,
   findPersonByNullifier,
@@ -56,7 +58,7 @@ import { clientBuyer, createDuel, createTask, hireSpecialist, loadTemplate, publ
 import { capabilitiesOf, getProofView, listProofViews, runDemoProof, runSubcontract } from "./proofs";
 import { submitRating } from "./verifier";
 import { verifierHealth } from "./verifier-client";
-import { agentDetail, agentView, duelView, hireView, personView, taskView } from "./views";
+import { agentDetail, agentView, duelView, hireView, personView, remoteAgentDetail, remoteAgentView, taskView } from "./views";
 
 const COOKIE = "ethernals_session";
 const HANDLE_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$/;
@@ -102,13 +104,27 @@ function startBuyerCreation(person: PersonRow): void {
   buyerCreation.set(person.id, p);
 }
 
+/** Display-only balances for /api/me: cached 10 s and capped at 3 s, so a slow mirror node never stalls every page. */
+const balanceCache = new Map<string, { at: number; value: Awaited<ReturnType<typeof getBalances>> }>();
+async function displayBalances(accountId: string) {
+  const cached = balanceCache.get(accountId);
+  if (cached && Date.now() - cached.at < 10_000) return cached.value;
+  const fetchFresh = getBalances(accountId).then((value) => {
+    balanceCache.set(accountId, { at: Date.now(), value });
+    return value;
+  });
+  fetchFresh.catch(() => undefined);
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+  return (await Promise.race([fetchFresh.catch(() => null), timeout])) ?? cached?.value ?? null;
+}
+
 async function meResponse(person: PersonRow | null): Promise<MeResponse> {
   if (!person) return { person: null, buyerAgent: null, agents: [], hires: [] };
   const mine = listAgentsOfPerson(person.id).filter((a) => !a.arena_role);
   const buyer = mine.find((a) => a.kind === "buyer");
   let buyerAgent: MeResponse["buyerAgent"] = null;
   if (buyer) {
-    const balances = await getBalances(buyer.hedera_account_id).catch(() => null);
+    const balances = await displayBalances(buyer.hedera_account_id);
     buyerAgent = {
       ...(await agentView(buyer)),
       usdcBalance: balances ? formatUnits6(balances.usdcUnits) : "?",
@@ -341,13 +357,22 @@ export function createApi(): Router {
   // ------------------------------------------------------------------ agents
   r.get("/api/agents", async (_req, res) => {
     const sellers = listAgents("seller").filter((a) => !a.arena_role);
-    res.json(await Promise.all(sellers.map(agentView)));
+    const local = await Promise.all(sellers.map(agentView));
+    // Agents other servers created: found on-chain (ENS + HireLedger), shown hire-only.
+    const names = new Set(sellers.map((a) => a.ens_name));
+    const remote = await Promise.all(listChainAgents().filter((r) => !names.has(r.name)).map(remoteAgentView));
+    res.json([...local, ...remote]);
   });
 
   r.get("/api/agents/:label", async (req, res) => {
     const label = String(req.params.label);
     const agent = getAgentByLabel(label) ?? getAgentByEnsName(label);
-    if (!agent) throw notFound(`No agent named ${label}.`);
+    if (!agent) {
+      const remote = getChainAgent(label);
+      if (!remote) throw notFound(`No agent named ${label}.`);
+      res.json(await remoteAgentDetail(remote));
+      return;
+    }
     res.json(await agentDetail(agent));
   });
 

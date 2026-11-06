@@ -112,6 +112,21 @@ export interface BrainRow {
   system_prompt?: string | null;
 }
 
+export interface ChainAgentRow {
+  name: string;
+  label: string;
+  key: string;
+  description: string;
+  endpoint: string | null;
+  provider: string | null;
+  task_type: string | null;
+  brain: string | null;
+  hedera_account: string | null;
+  status: "online" | "offline" | "private" | "unknown";
+  records_at: string;
+  checked_at: string;
+}
+
 export interface AgentToolRow {
   id: string;
   agent_key: string;
@@ -440,6 +455,22 @@ function migrate(d: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS agent_tools_agent ON agent_tools(agent_key);
+  `);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS chain_agents (
+      name TEXT PRIMARY KEY,
+      label TEXT NOT NULL UNIQUE,
+      key TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      endpoint TEXT,
+      provider TEXT,
+      task_type TEXT,
+      brain TEXT,
+      hedera_account TEXT,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      records_at TEXT NOT NULL,
+      checked_at TEXT NOT NULL
+    );
   `);
   const brainColumns = d.prepare("PRAGMA table_info(agent_brain)").all() as { name: string }[];
   if (!brainColumns.some((c) => c.name === "model_type")) d.exec("ALTER TABLE agent_brain ADD COLUMN model_type TEXT NOT NULL DEFAULT 'text'");
@@ -907,4 +938,23 @@ export function listProofsForAgent(agent: string): ProofRow[] {
 }
 export function setProofParent(id: string, parentId: string): void {
   getDb().prepare("UPDATE proofs SET parent_proof_id = ? WHERE id = ?").run(parentId, id);
+}
+
+// ---------- chain index cache (rebuildable from ENS and the HireLedger) ----------
+export function listChainAgents(): ChainAgentRow[] {
+  return getDb().prepare("SELECT * FROM chain_agents ORDER BY label").all() as unknown as ChainAgentRow[];
+}
+export function getChainAgent(nameOrLabel: string): ChainAgentRow | undefined {
+  return getDb().prepare("SELECT * FROM chain_agents WHERE label = ? OR name = ?").get(nameOrLabel, nameOrLabel) as unknown as ChainAgentRow | undefined;
+}
+export function upsertChainAgent(r: ChainAgentRow): void {
+  getDb()
+    .prepare(
+      `INSERT INTO chain_agents (name, label, key, description, endpoint, provider, task_type, brain, hedera_account, status, records_at, checked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(name) DO UPDATE SET label = excluded.label, key = excluded.key, description = excluded.description,
+         endpoint = excluded.endpoint, provider = excluded.provider, task_type = excluded.task_type, brain = excluded.brain,
+         hedera_account = excluded.hedera_account, status = excluded.status, records_at = excluded.records_at, checked_at = excluded.checked_at`,
+    )
+    .run(r.name, r.label, r.key, r.description, r.endpoint, r.provider, r.task_type, r.brain, r.hedera_account, r.status, r.records_at, r.checked_at);
 }
