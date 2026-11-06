@@ -5,7 +5,7 @@
  * Prompts can hold repo code and hidden tests, so every call is pinned to 0G's sealed providers. 0G answers 503 when none
  * is available and never falls back to a weaker tier.
  */
-import { formatUnits6, type AgentBrainView, type InferenceReceipt } from "@ethernals/shared";
+import { formatUnits6, type AgentBrainView, type AgentConfigView, type InferenceReceipt } from "@ethernals/shared";
 import { config } from "./config";
 import { decryptSecret, encryptSecret, randomId } from "./crypto";
 import {
@@ -13,6 +13,7 @@ import {
   getAgent,
   getBrain,
   insertReceipt,
+  listAgentTools,
   listReceipts,
   listReceiptsForTask,
   upsertBrain,
@@ -24,6 +25,7 @@ import { queueEarningsUpdate } from "./ens";
 import { emit, log } from "./events";
 import { llmMode } from "./llm-mode";
 import { createSafeFetch } from "./sandbox";
+import { loadToolBundle } from "./agent-tools";
 
 const PREFERRED_MODEL = "0gm-1.0-35b-a3b";
 const PRICING_TTL_MS = 10 * 60 * 1000;
@@ -46,6 +48,18 @@ export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
 }
+
+/** The 0G Router model families and their endpoints. */
+export const MODEL_TYPES = ["text", "image", "decision", "embedding", "video"] as const;
+export type ModelType = (typeof MODEL_TYPES)[number];
+const ENDPOINTS: Record<ModelType, string> = {
+  text: "/chat/completions",
+  image: "/images/generations",
+  decision: "/decisions",
+  embedding: "/embeddings",
+  video: "/videos",
+};
+const MAX_TOOL_ROUNDS = 4;
 
 export interface ThinkRequest {
   purpose: string;
@@ -193,10 +207,16 @@ function providerFrom(res: Response, body: { provider?: unknown }): string | nul
 
 // ---------------------------------------------------------------- the call
 
+interface ToolCall {
+  id: string;
+  type?: string;
+  function: { name: string; arguments: string };
+}
+
 interface ChatResponse {
   id?: string;
   provider?: unknown;
-  choices?: { message?: { content?: string | null } }[];
+  choices?: { message?: { content?: string | null; tool_calls?: ToolCall[] } }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
@@ -207,9 +227,9 @@ export function setRetryDelayForTests(ms: number): void {
   retryDelayMs = ms;
 }
 
-async function postChat(apiKey: string, payload: unknown): Promise<Response> {
+async function postChat(apiKey: string, payload: unknown, path = "/chat/completions"): Promise<Response> {
   const send = () =>
-    safeFetch()(`${config.zeroG.routerBaseUrl()}/chat/completions`, {
+    safeFetch()(`${config.zeroG.routerBaseUrl()}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}`, [TRUST_MODE_HEADER]: TRUST_MODE },
       body: JSON.stringify(payload),
@@ -227,8 +247,8 @@ function agentApiKey(brain: BrainRow | undefined): string | null {
   return config.zeroG.apiKeyOrNull();
 }
 
-async function callRouter(key: string, payload: unknown): Promise<{ res: Response; body: ChatResponse }> {
-  const res = await postChat(key, payload);
+async function callRouter(key: string, payload: unknown, path = "/chat/completions"): Promise<{ res: Response; body: ChatResponse }> {
+  const res = await postChat(key, payload, path);
   if (!res.ok) throw new RouterError(res.status, `The 0G Router answered HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return { res, body: (await res.json()) as ChatResponse };
 }
@@ -238,37 +258,75 @@ async function callRouter(key: string, payload: unknown): Promise<{ res: Respons
  * Every call records a receipt and spends the agent's credit.
  */
 export async function think(agent: AgentRow | null, request: ThinkRequest): Promise<ThinkResult> {
-  const brain = agent ? ensureBrain(agent, await resolveModel()) : undefined;
-  const model = await resolveModel();
-  const modelId = brain?.model ?? model.id;
-  const usable = modelId === model.id ? model : ((await loadModels()).find((m) => m.id === modelId) ?? model);
-
-  const payload: Record<string, unknown> = {
-    model: usable.id,
-    messages: request.messages,
-    max_tokens: Math.max(request.maxTokens ?? 0, MIN_MAX_TOKENS),
-  };
-  if (usable.supported_parameters?.includes("reasoning_effort")) payload.reasoning_effort = "low";
-  if (request.json && supportsJson(usable)) payload.response_format = { type: "json_object" };
+  const stored = agent ? getBrain(agent.key) : undefined;
+  const brain = agent ? (stored ?? ensureBrain(agent, await resolveModel())) : undefined;
+  const modelType = (brain?.model_type as ModelType | undefined) ?? "text";
+  const usable = await usableModel(brain, modelType);
 
   const ownKey = agent ? agentApiKey(brain) : config.zeroG.apiKeyOrNull();
   if (!ownKey) throw new RouterError(503, "No 0G API key is set. Add ZG_API_KEY to .env (see SETUP.md).");
   const shared = config.zeroG.apiKeyOrNull();
 
-  let answer: { res: Response; body: ChatResponse };
-  try {
-    answer = await callRouter(ownKey, payload);
-  } catch (err) {
-    const keyRefused = err instanceof RouterError && (err.status === 401 || err.status === 403);
-    if (!keyRefused || !shared || shared === ownKey) throw err;
-    emit("info", { agentEnsName: agent?.ens_name, message: "This agent's 0G key was refused, so it used the shared key." });
-    answer = await callRouter(shared, payload);
+  const send = async (payload: unknown, path: string) => {
+    try {
+      return await callRouter(ownKey, payload, path);
+    } catch (err) {
+      const keyRefused = err instanceof RouterError && (err.status === 401 || err.status === 403);
+      if (!keyRefused || !shared || shared === ownKey) throw err;
+      emit("info", { agentEnsName: agent?.ens_name, message: "This agent's 0G key was refused, so it used the shared key." });
+      return callRouter(shared, payload, path);
+    }
+  };
+
+  // The provider's own system prompt goes first, then the task's instructions.
+  const messages: Record<string, unknown>[] = request.messages.map((m) => ({ ...m }));
+  if (brain?.system_prompt) {
+    const first = messages[0];
+    if (first && first.role === "system") first.content = `${brain.system_prompt}\n\n${String(first.content)}`;
+    else messages.unshift({ role: "system", content: brain.system_prompt });
   }
 
-  const { res, body } = answer;
-  const text = body.choices?.[0]?.message?.content ?? "";
-  const promptTokens = body.usage?.prompt_tokens ?? 0;
-  const completionTokens = body.usage?.completion_tokens ?? 0;
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let last: { res: Response; body: ChatResponse };
+  let text = "";
+
+  if (modelType !== "text") {
+    last = await send(mediaPayload(modelType, usable.id, messages), ENDPOINTS[modelType]);
+    text = mediaText(modelType, last.body);
+    promptTokens = last.body.usage?.prompt_tokens ?? 0;
+    completionTokens = last.body.usage?.completion_tokens ?? 0;
+  } else {
+    const payload: Record<string, unknown> = { model: usable.id, messages, max_tokens: Math.max(request.maxTokens ?? 0, MIN_MAX_TOKENS) };
+    if (usable.supported_parameters?.includes("reasoning_effort")) payload.reasoning_effort = "low";
+    if (request.json && supportsJson(usable)) payload.response_format = { type: "json_object" };
+    const tools = agent && !request.json ? await loadToolBundle(agent.key) : null;
+    if (tools) payload.tools = tools.defs;
+
+    for (let round = 0; ; round++) {
+      last = await send(payload, ENDPOINTS.text);
+      promptTokens += last.body.usage?.prompt_tokens ?? 0;
+      completionTokens += last.body.usage?.completion_tokens ?? 0;
+      const message = last.body.choices?.[0]?.message;
+      const calls = message?.tool_calls ?? [];
+      if (!tools || calls.length === 0 || round >= MAX_TOOL_ROUNDS) {
+        text = message?.content ?? "";
+        break;
+      }
+      messages.push({ role: "assistant", content: message?.content ?? "", tool_calls: calls });
+      for (const call of calls) {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(call.function.arguments || "{}");
+        } catch {
+          /* the tool sees empty arguments */
+        }
+        messages.push({ role: "tool", tool_call_id: call.id, content: await tools.call(call.function.name, args) });
+      }
+    }
+  }
+
+  const { res, body } = last;
   const requestId = body.id ?? res.headers.get("x-request-id") ?? randomId("zg");
   const receipt = recordReceipt({
     agent,
@@ -284,6 +342,55 @@ export async function think(agent: AgentRow | null, request: ThinkRequest): Prom
   if (!text.trim()) throw new RouterError(502, "The model spent its whole token budget thinking and gave no answer.");
   const clean = stripThinking(text);
   return { text: clean, json: request.json ? extractLastJson(clean) : undefined, receipt };
+}
+
+/** The agent's chosen model. Non-text models are not in the chat model list, so they skip it. A slow Router never blocks a text agent that already has a model. */
+async function usableModel(brain: BrainRow | undefined, modelType: ModelType): Promise<RouterModel> {
+  if (brain?.model && modelType !== "text") return { id: brain.model };
+  if (brain?.model) {
+    try {
+      return (await loadModels()).find((m) => m.id === brain.model) ?? { id: brain.model };
+    } catch {
+      return { id: brain.model };
+    }
+  }
+  return resolveModel();
+}
+
+function lastUserText(messages: Record<string, unknown>[]): string {
+  const user = [...messages].reverse().find((m) => m.role === "user");
+  return String(user?.content ?? "");
+}
+
+function mediaPayload(type: ModelType, model: string, messages: Record<string, unknown>[]): Record<string, unknown> {
+  const prompt = lastUserText(messages);
+  const system = messages.find((m) => m.role === "system")?.content;
+  const full = system ? `${String(system)}\n\n${prompt}` : prompt;
+  switch (type) {
+    case "image":
+    case "video":
+      return { model, prompt: full };
+    case "embedding":
+      return { model, input: prompt };
+    default:
+      return { model, messages }; // decision
+  }
+}
+
+function mediaText(type: ModelType, body: unknown): string {
+  const b = body as Record<string, any>;
+  if (type === "image") {
+    const items = (b.data ?? []) as { url?: string; b64_json?: string }[];
+    return items.map((d) => d.url ?? (d.b64_json ? `data:image/png;base64,${d.b64_json}` : "")).filter(Boolean).join("\n") || JSON.stringify(b);
+  }
+  if (type === "embedding") {
+    const vec = b.data?.[0]?.embedding as number[] | undefined;
+    return vec ? `embedding with ${vec.length} dimensions: [${vec.slice(0, 8).map((n) => n.toFixed(4)).join(", ")}, …]` : JSON.stringify(b);
+  }
+  if (type === "video") {
+    return b.id ? `video job ${b.id} (${b.status ?? "queued"}). Fetch ${config.zeroG.routerBaseUrl()}/videos/${b.id}/content when it is done.` : JSON.stringify(b);
+  }
+  return b.choices?.[0]?.message?.content ?? JSON.stringify(b);
 }
 
 function recordReceipt(r: {
@@ -375,11 +482,22 @@ function born(agent: AgentRow, step: string, message: string): void {
 }
 
 /** Gives a new seller agent its own 0G key, its seed credit and a first thought. Keeps going on failure and says so. */
-export async function spinUpBrain(agent: AgentRow): Promise<BrainRow | null> {
+export interface BrainOptions {
+  ownKey?: string;
+  modelType?: ModelType;
+  model?: string;
+  systemPrompt?: string;
+}
+
+export async function spinUpBrain(agent: AgentRow, opts: BrainOptions = {}): Promise<BrainRow | null> {
   if (!config.zeroG.enabled()) return null;
+  const { ownKey } = opts;
+  const modelType = opts.modelType ?? "text";
   let model: RouterModel;
   try {
-    model = await resolveModel();
+    if (opts.model) model = { id: opts.model };
+    else if (modelType !== "text") throw new RouterError(400, `Pick a model name for a ${modelType} agent.`);
+    else model = await resolveModel();
   } catch (err) {
     log.error(`0G Router unreachable while spinning up ${agent.ens_name}`, err);
     born(agent, "brain", `0G brain ✖ the Router is unreachable: ${(err as Error).message}`);
@@ -389,9 +507,15 @@ export async function spinUpBrain(agent: AgentRow): Promise<BrainRow | null> {
   let encrypted: string | null = null;
   let keyLabel: string | null = null;
   try {
-    encrypted = encryptSecret(await createAgentKey(agent.ens_name));
-    keyLabel = agent.ens_name;
-    born(agent, "brain-key", "0G brain key ✓");
+    if (ownKey) {
+      encrypted = encryptSecret(ownKey); // AES-encrypted with KEYSTORE_SECRET, only decrypted inside think()
+      keyLabel = `${ownKey.slice(0, 5)}…${ownKey.slice(-4)}`;
+      born(agent, "brain-key", "0G brain key ✓ (your own key)");
+    } else {
+      encrypted = encryptSecret(await createAgentKey(agent.ens_name));
+      keyLabel = agent.ens_name;
+      born(agent, "brain-key", "0G brain key ✓");
+    }
   } catch (err) {
     log.warn(`per-agent 0G key failed for ${agent.ens_name}`, { error: (err as Error).message });
     born(agent, "brain-key", `0G brain key: using the shared key (${(err as Error).message})`);
@@ -407,7 +531,11 @@ export async function spinUpBrain(agent: AgentRow): Promise<BrainRow | null> {
     earned_units: "0",
     credited_from_earnings_neuron: "0",
     last_request_id: null,
+    model_type: modelType,
+    system_prompt: opts.systemPrompt?.trim() || null,
   });
+
+  if (modelType !== "text") return getBrain(agent.key) ?? null; // no text first thought for image/video/embedding agents
 
   try {
     const { receipt } = await think(agent, {
@@ -493,5 +621,58 @@ export function brainView(agent: AgentRow): AgentBrainView {
     status: isDormant(agent) ? "dormant" : "awake",
     receipts: countReceipts(agent.key),
     lastRequestId: brain?.last_request_id ?? null,
+  };
+}
+
+// ---------------------------------------------------------------- provider settings
+
+export interface BrainUpdate {
+  modelType?: ModelType;
+  model?: string;
+  systemPrompt?: string;
+  zgApiKey?: string;
+}
+
+/** Provider edits their agent's model, system prompt or own 0G key. The key is stored encrypted and never returned. */
+export function updateBrainSettings(agent: AgentRow, update: BrainUpdate): BrainRow {
+  const current =
+    getBrain(agent.key) ??
+    upsertBrain({
+      agent_key: agent.key,
+      api_key_enc: null,
+      key_label: null,
+      model: currentModelId(),
+      credit_neuron: config.zeroG.seedCreditNeuron().toString(),
+      spent_neuron: "0",
+      earned_units: "0",
+      credited_from_earnings_neuron: "0",
+      last_request_id: null,
+    });
+  const key = update.zgApiKey?.trim();
+  return upsertBrain({
+    ...current,
+    model_type: update.modelType ?? current.model_type ?? "text",
+    model: update.model?.trim() || current.model,
+    system_prompt: update.systemPrompt !== undefined ? update.systemPrompt.trim() || null : (current.system_prompt ?? null),
+    api_key_enc: key ? encryptSecret(key) : current.api_key_enc,
+    key_label: key ? `${key.slice(0, 5)}…${key.slice(-4)}` : current.key_label,
+  });
+}
+
+export function brainSettingsView(agent: AgentRow): AgentConfigView {
+  const brain = getBrain(agent.key);
+  return {
+    modelType: (brain?.model_type as ModelType | undefined) ?? "text",
+    model: brain?.model ?? currentModelId(),
+    systemPrompt: brain?.system_prompt ?? "",
+    keyLabel: brain?.key_label ?? null,
+    tools: listAgentTools(agent.key).map((t) => ({
+      id: t.id,
+      kind: t.kind,
+      name: t.name,
+      url: t.url,
+      description: t.description,
+      hasAuth: Boolean(t.auth_enc),
+    })),
   };
 }

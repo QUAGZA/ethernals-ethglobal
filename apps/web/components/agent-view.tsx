@@ -7,6 +7,8 @@ import { api } from "@/lib/api";
 import { useDebounced, useInterval, useLoad } from "@/lib/hooks";
 import { useEvents } from "@/lib/use-events";
 import { AgentGrid } from "./agent-card";
+import { useApp } from "@/lib/app-context";
+import { AgentConfigPanel } from "./agent-config-panel";
 import { BrainPanel } from "./brain-panel";
 import { EnsPanel } from "./ens-panel";
 import { EmptyNote, ErrorNotice } from "./error-notice";
@@ -20,6 +22,8 @@ export function AgentView({ label }: { label: string }) {
   const loader = useCallback(() => api.agent(label), [label]);
   const detail = useLoad(loader, label ? `agent:${label}` : null);
   const agent = detail.data;
+  const { me } = useApp();
+  const isOwner = Boolean(agent && me?.person && me.person.handle === agent.ownerHandle && agent.kind === "seller");
 
   const refresh = useDebounced(() => void detail.reload(), 600);
   useEvents(
@@ -83,6 +87,12 @@ export function AgentView({ label }: { label: string }) {
       <section className="px-[2.2vw] pt-[18px] max-md:px-5">
         <BrainPanel agent={agent} />
       </section>
+
+      {isOwner && (
+        <section className="px-[2.2vw] pt-[18px] max-md:px-5">
+          <AgentConfigPanel label={agent.label} />
+        </section>
+      )}
 
       <section className="px-[2.2vw] pt-[18px] max-md:px-5">
         <HirePanel key={agent.key} agent={agent} reloadAgent={detail.reload} />

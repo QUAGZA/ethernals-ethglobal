@@ -106,6 +106,22 @@ export interface BrainRow {
   earned_units: string;
   credited_from_earnings_neuron: string;
   last_request_id: string | null;
+  /** text | image | decision | embedding | video (default text). */
+  model_type?: string;
+  /** Provider-written system prompt, prepended to every task this agent thinks about. */
+  system_prompt?: string | null;
+}
+
+export interface AgentToolRow {
+  id: string;
+  agent_key: string;
+  kind: "mcp" | "http";
+  name: string;
+  url: string;
+  description: string;
+  schema_json: string | null;
+  auth_enc: string | null;
+  created_at: string;
 }
 
 export interface ReceiptRow {
@@ -411,6 +427,23 @@ function migrate(d: DatabaseSync): void {
   if (!agentColumns.some((c) => c.name === "strategy")) {
     d.exec("ALTER TABLE agents ADD COLUMN strategy TEXT NOT NULL DEFAULT 'careful'");
   }
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS agent_tools (
+      id TEXT PRIMARY KEY,
+      agent_key TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      schema_json TEXT,
+      auth_enc TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS agent_tools_agent ON agent_tools(agent_key);
+  `);
+  const brainColumns = d.prepare("PRAGMA table_info(agent_brain)").all() as { name: string }[];
+  if (!brainColumns.some((c) => c.name === "model_type")) d.exec("ALTER TABLE agent_brain ADD COLUMN model_type TEXT NOT NULL DEFAULT 'text'");
+  if (!brainColumns.some((c) => c.name === "system_prompt")) d.exec("ALTER TABLE agent_brain ADD COLUMN system_prompt TEXT");
   const taskColumns = d.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
   if (!taskColumns.some((c) => c.name === "calibration_json")) {
     d.exec("ALTER TABLE tasks ADD COLUMN calibration_json TEXT");
@@ -680,17 +713,32 @@ export function upsertBrain(row: BrainRow): BrainRow {
   getDb()
     .prepare(
       `INSERT INTO agent_brain (agent_key, api_key_enc, key_label, model, credit_neuron, spent_neuron, earned_units,
-        credited_from_earnings_neuron, last_request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        credited_from_earnings_neuron, last_request_id, model_type, system_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(agent_key) DO UPDATE SET api_key_enc = excluded.api_key_enc, key_label = excluded.key_label,
         model = excluded.model, credit_neuron = excluded.credit_neuron, spent_neuron = excluded.spent_neuron,
         earned_units = excluded.earned_units, credited_from_earnings_neuron = excluded.credited_from_earnings_neuron,
-        last_request_id = excluded.last_request_id`,
+        last_request_id = excluded.last_request_id, model_type = excluded.model_type, system_prompt = excluded.system_prompt`,
     )
     .run(
       row.agent_key, row.api_key_enc, row.key_label, row.model, row.credit_neuron, row.spent_neuron, row.earned_units,
-      row.credited_from_earnings_neuron, row.last_request_id,
+      row.credited_from_earnings_neuron, row.last_request_id, row.model_type ?? "text", row.system_prompt ?? null,
     );
   return getBrain(row.agent_key)!;
+}
+
+// ---------- agent tools (MCP servers and HTTP tools) ----------
+export function listAgentTools(agentKey: string): AgentToolRow[] {
+  return getDb().prepare("SELECT * FROM agent_tools WHERE agent_key = ? ORDER BY created_at").all(agentKey) as unknown as AgentToolRow[];
+}
+export function insertAgentTool(t: Omit<AgentToolRow, "created_at">): AgentToolRow {
+  const createdAt = now();
+  getDb()
+    .prepare("INSERT INTO agent_tools (id, agent_key, kind, name, url, description, schema_json, auth_enc, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(t.id, t.agent_key, t.kind, t.name, t.url, t.description, t.schema_json, t.auth_enc, createdAt);
+  return { ...t, created_at: createdAt };
+}
+export function deleteAgentTool(id: string, agentKey: string): boolean {
+  return Number(getDb().prepare("DELETE FROM agent_tools WHERE id = ? AND agent_key = ?").run(id, agentKey).changes) > 0;
 }
 export function resetBrainCredit(seedNeuron: bigint): void {
   getDb()
