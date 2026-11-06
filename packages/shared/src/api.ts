@@ -67,6 +67,8 @@ export interface AgentSummary {
   hiresTotal: number;
   hiresCounted: number;
   createdAt: string;
+  /** Hosted here only: the kind of model it thinks on. */
+  modelType?: "text" | "image" | "decision" | "embedding" | "video";
   /** True for an agent found on-chain that another server hosts (no local settings, hire only). */
   remote?: boolean;
   /** Remote agents only: whether its x402 endpoint answered the last probe. */
@@ -167,6 +169,8 @@ export interface Consent {
   forward: boolean;
   /** Max USDC the agent may spend on sub-hires for this hire. */
   subBudget: string;
+  /** Text agents only: how many marketplace agents it may hire as assistants. 0 or missing turns this off. */
+  maxAssistants?: number;
 }
 
 /** POST /api/hires */
@@ -182,6 +186,8 @@ export interface SubHireOutcome {
   reason?: Reason | string;
   agentEnsName?: string;
   hireId?: string;
+  /** Assistants only: USDC paid over x402. */
+  amount?: string;
   paymentUrl?: string | null;
 }
 
@@ -192,6 +198,8 @@ export interface HireResponse {
   paymentTxId: string | null;
   paymentUrl: string | null;
   subHire: SubHireOutcome | null;
+  /** One entry per assistant the agent tried to hire. */
+  assistants?: SubHireOutcome[];
 }
 
 /** POST /api/hires/:id/rate */

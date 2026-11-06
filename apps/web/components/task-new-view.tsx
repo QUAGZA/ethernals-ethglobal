@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { DRAFT_TEST_PATH, type CalibrationReport, type CreateTaskRequest } from "@ethernals/shared";
 import { api, toApiError, type ApiRequestError } from "@/lib/api";
 import { useElapsed, useLoad } from "@/lib/hooks";
@@ -25,7 +25,8 @@ export interface SpecialistOption {
 /** Code-fix agents with their score, price, verified tasks and brain status. */
 export function useSpecialists() {
   const loader = useCallback(async (): Promise<SpecialistOption[]> => {
-    const agents = (await api.agents()).filter((a) => a.taskType === "code-fix");
+    // Agents hosted elsewhere can't take a task from this server, and have no local brain to read.
+    const agents = (await api.agents()).filter((a) => a.taskType === "code-fix" && !a.remote);
     return Promise.all(
       agents.map(async (agent) => {
         const [detail, brain] = await Promise.all([api.agent(agent.label), api.agentBrain(agent.label)]);
@@ -74,6 +75,12 @@ function NewTaskForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiRequestError | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
+
+  // An agent's page links here with that agent already picked.
+  useEffect(() => {
+    const picked = new URLSearchParams(window.location.search).get("specialist");
+    if (picked) setSpecialist(picked);
+  }, []);
 
   const template = templates.data?.[0];
   const drafting = draftStartedAt !== null;

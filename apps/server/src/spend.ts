@@ -1,6 +1,6 @@
 /**
  * Spending controls. Every bounty goes through a SpendGuard:
- *  - Namera (Dev A's @ethernals/spend-guard): a session key limited by on-chain policy;
+ *  - Namera: a session key limited by on-chain policy;
  *  - DirectGuard: the buyer agent's own key with limits checked only by this server, labelled weaker in the UI.
  * A block is a normal outcome, recorded and shown, never an exception.
  */
@@ -20,14 +20,14 @@ import {
   type SpendEventRow,
 } from "./db";
 import { sepoliaPublic } from "./ens";
-import { AppError, badRequest } from "./errors";
+import { badRequest } from "./errors";
 import { emit } from "./events";
+import { createNameraGuard } from "./namera-guard";
 import { SerialQueue } from "./queue";
 
 export const MAX_DIRECT_BOUNTY_USDC = 10;
 export const MAX_DIRECT_SPENDS_PER_HOUR = 10;
 const HOUR_MS = 60 * 60 * 1000;
-const NAMERA_PACKAGE = "@ethernals/spend-guard";
 
 const senderQueues = new Map<string, SerialQueue>();
 
@@ -120,22 +120,8 @@ export function setNameraFactoryForTests(factory: NameraFactory | null): void {
   nameraFactory = factory;
 }
 
-/** Dev A's package arrives at CP2. Loaded by name, so this file builds and runs before it lands. */
-async function loadNameraFactory(): Promise<NameraFactory> {
-  if (nameraFactory) return nameraFactory;
-  try {
-    const name = NAMERA_PACKAGE;
-    const module = (await import(/* @vite-ignore */ name)) as { createNameraGuard: NameraFactory };
-    nameraFactory = module.createNameraGuard;
-    return nameraFactory;
-  } catch {
-    throw new AppError(503, "Namera spending controls are not installed on this server yet.", `Merge main and add ${NAMERA_PACKAGE} to apps/server (PRD B, CP2).`);
-  }
-}
-
 export async function buildNameraGuard(options: Omit<NameraOptions, "apiUrl">): Promise<SpendGuard> {
-  const factory = await loadNameraFactory();
-  return factory({ ...options, apiUrl: config.namera.apiUrl() });
+  return (nameraFactory ?? createNameraGuard)({ ...options, apiUrl: config.namera.apiUrl() });
 }
 
 /** The person's Namera guard if they connected one, otherwise the DirectGuard on their buyer agent. */

@@ -2,7 +2,7 @@ import type { SubHireOutcome } from "@ethernals/shared";
 import { PaymentLink } from "./ext-link";
 import { ReasonBadge, StatusTag, reasonLabel } from "./reason-badge";
 
-/** What happened to the "also translate to Hindi" sub-hire. */
+/** One sub-hire: the "also translate to Hindi" step, or an assistant the agent recruited. */
 export function SubHireOutcomeView({ subHire }: { subHire: SubHireOutcome | null }) {
   if (!subHire) return null;
   const target = subHire.agentEnsName ?? "the sub-agent";
@@ -30,7 +30,7 @@ export function SubHireOutcomeView({ subHire }: { subHire: SubHireOutcome | null
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 leading-[1.5]">
           <StatusTag tone="good">SUB-HIRED</StatusTag>
           <span>
-            {target} was hired and paid from this agent&apos;s own account, within your sub-budget.
+            {target} was hired and paid{subHire.amount ? ` ${subHire.amount} USDC` : ""} from this agent&apos;s own account, within your sub-budget.
           </span>
           <PaymentLink href={subHire.paymentUrl} />
         </div>

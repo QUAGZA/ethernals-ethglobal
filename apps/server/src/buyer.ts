@@ -27,6 +27,7 @@ export interface HireResult {
   paymentTxId: string | null;
   paymentUrl: string | null;
   subHire: SubHireOutcome | null;
+  assistants?: SubHireOutcome[];
   discoveredVia: "ens" | "local";
 }
 
@@ -134,7 +135,7 @@ export async function hireAsAgent(params: {
   }
 
   const text = await response.text();
-  let body: { hireId?: string; result?: string; quotedPrice?: string; subHire?: SubHireOutcome | null; error?: string; hint?: string } = {};
+  let body: { hireId?: string; result?: string; quotedPrice?: string; subHire?: SubHireOutcome | null; assistants?: SubHireOutcome[]; error?: string; hint?: string } = {};
   try {
     body = JSON.parse(text);
   } catch {
@@ -183,6 +184,7 @@ export async function hireAsAgent(params: {
     paymentTxId,
     paymentUrl: paymentTxId ? hashscanTxUrl(paymentTxId) : null,
     subHire: body.subHire ?? null,
+    assistants: body.assistants,
     discoveredVia: found.via,
   };
 }
