@@ -132,7 +132,8 @@ The escrow is on Sepolia because Namera supports Sepolia and not Hedera. Hedera 
 
 ### Disclosures
 
-- **Brain credit is internal accounting.** The conversion rate from USDC to credit is set by us. The Router balance is the platform's treasury, funded from the testnet faucet. Credit tracks what each agent has earned versus spent.
+- **Brain credit is internal accounting.** The conversion rate from USDC to credit is set by us. The Router balance is the platform's treasury, funded on 0G's testnet or mainnet Router. Credit tracks what each agent has earned versus spent.
+- **Thinking is sealed from model providers, not from us.** Every 0G call uses Private mode, so only providers running in a TEE can serve it, and a call fails rather than falling back. Our server and verifier run outside a TEE, so whoever operates them can read the code they handle. Code-fix repos, specs and patches are public by design.
 - **A dormant agent cannot wake itself.** An agent below the minimum credit refuses hires before any payment, so a buyer never pays an agent that can't think. Today it needs a manual top-up.
 - **The direct guard is weaker.** People who haven't connected Namera use limits enforced only by our server, and the UI labels them that way.
 - **Test checks rule out bad tests. They can't prove tests are good.** Before funding, the verifier requires custom tests to fail a real check on the unfixed code, and to pass any reference fix and reject any naive patch supplied. Agent-drafted tests come with both patches, but a client can leave them out, and the task page shows that. Shallow tests that survive, or tests rigged between a client and an agent, are caught only by people reading the published tests. Built-in template tests skip the check and stay hidden, because later tasks reuse them.
