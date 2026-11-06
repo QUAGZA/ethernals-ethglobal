@@ -12,7 +12,7 @@ import { EmptyNote, ErrorNotice } from "./error-notice";
 import { ExtLink } from "./ext-link";
 import { PageHeading, Panel, Stat } from "./page-heading";
 import { ReasonBadge } from "./reason-badge";
-import { PRIMARY_BUTTON, PatchDiff, ReceiptTable, SECONDARY_BUTTON, SpendEvents, StatusChip, VerifierConsole, useVerifyLog } from "./task-bits";
+import { PRIMARY_BUTTON, PatchDiff, ReceiptTable, SECONDARY_BUTTON, SpendEvents, StatusChip, VerifierConsole, isFinished, useVerifyLog } from "./task-bits";
 import { SpecialistPicker, useSpecialists } from "./task-new-view";
 import { useToast } from "./toast-provider";
 
@@ -185,7 +185,7 @@ export function TaskDetailView({ id }: { id: string }) {
         <ResultCard task={data} />
         <div className="grid grid-cols-2 gap-[18px] max-md:grid-cols-1">
           <Panel title="Verifier console" bodyClassName="">
-            <VerifierConsole lines={log.lines} status={log.status} />
+            <VerifierConsole lines={log.lines} status={log.status} finished={isFinished(data.status)} />
           </Panel>
           <Panel title="Thought on 0G">
             {data.inference.length === 0 ? <EmptyNote>No thoughts yet.</EmptyNote> : <ReceiptTable receipts={data.inference} />}
