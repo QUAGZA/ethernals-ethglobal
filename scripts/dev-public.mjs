@@ -5,13 +5,14 @@
  *  3. starts `pnpm dev`;
  *  4. once the server answers, runs `pnpm ens:sync` so every agent's ENS endpoint record points at the tunnel.
  * A quick tunnel gets a new URL on every run, so ens:sync runs every time (one Sepolia transaction per agent).
- * Set SKIP_ENS_SYNC=1 to skip step 4.
+ * Set SKIP_ENS_SYNC=1 to skip step 4. Pass --prod to serve a production build (faster and smoother through the tunnel).
  */
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const PROD = process.argv.includes("--prod");
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const envFile = path.join(root, ".env");
 
@@ -64,7 +65,18 @@ function onTunnelOutput(chunk) {
   console.log(`\n[tunnel] public URL: ${url}\n`);
   setEnv("PUBLIC_BASE_URL", url);
 
-  const dev = spawn("pnpm", ["dev"], { cwd: root, stdio: "inherit", shell: true });
+  let command = ["dev"];
+  if (PROD) {
+    // Production build: small minified bundles, much faster through a tunnel than the dev server.
+    console.log("[tunnel] building the web app for production (about a minute)...");
+    const build = spawnSync("pnpm", ["--filter", "@ethernals/web", "build"], { cwd: root, stdio: "inherit", shell: true });
+    if (build.status !== 0) {
+      console.error("[tunnel] web build failed; fix the build or run without --prod.");
+      shutdown(1);
+    }
+    command = ["start"];
+  }
+  const dev = spawn("pnpm", command, { cwd: root, stdio: "inherit", shell: true });
   children.push(dev);
   dev.on("exit", (code) => shutdown(code ?? 0));
 

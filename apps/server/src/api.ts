@@ -47,6 +47,7 @@ import {
   listSpendEvents,
   listTasks,
   setCredentialExpiry,
+  updateAgent,
   upsertSpendAccount,
   type PersonRow,
 } from "./db";
@@ -218,6 +219,7 @@ export function createApi(): Router {
       hederaNetwork: "testnet",
       paymentAsset: config.hedera.paymentAsset,
       ledgerAddress: config.hedera.ledgerAddressOrNull(),
+      usdcTokenId: config.hedera.usdcTokenId,
       zeroG: { enabled: config.zeroG.enabled(), network: config.zeroG.network(), model: config.zeroG.enabled() ? currentModelId() : config.llm.model },
       namera: { enabled: config.namera.enabled() },
       escrow: { address: config.escrow.addressOrNull(), token: config.escrow.tokenOrNull(), chainId: ESCROW_CHAIN_ID },
@@ -300,6 +302,17 @@ export function createApi(): Router {
   r.post("/api/me/buyer", async (req, res) => {
     const person = requirePerson(req);
     await ensureBuyerAgent(person);
+    res.json(await meResponse(person));
+  });
+
+  // After the person sends USDC to their buyer agent from their own wallet: spend up to the full on-chain balance.
+  r.post("/api/me/buyer/sync-budget", async (req, res) => {
+    const person = requirePerson(req);
+    const buyer = listAgentsOfPerson(person.id).find((a) => a.kind === "buyer" && !a.arena_role);
+    if (!buyer) throw new AppError(409, "Your buyer agent is still being created.", "Wait a few seconds and try again.");
+    const balances = await getBalances(buyer.hedera_account_id);
+    updateAgent(buyer.key, { budget_remaining: balances.usdcUnits.toString() });
+    balanceCache.delete(buyer.hedera_account_id);
     res.json(await meResponse(person));
   });
 
@@ -392,12 +405,22 @@ export function createApi(): Router {
     res.json(await agentDetail(agent));
   });
 
+  // Settings-like details (model, key, credit, receipts) are for the creator only; everyone else gets public stats.
+  const isCreator = (req: Request, agent: { person_id: string }) => sessionPerson(req)?.id === agent.person_id;
+
   r.get("/api/agents/:label/brain", (req, res) => {
-    res.json(brainView(agentByName(String(req.params.label))));
+    const agent = agentByName(String(req.params.label));
+    const view = brainView(agent);
+    if (isCreator(req, agent)) {
+      res.json(view);
+      return;
+    }
+    res.json({ ...view, model: "", keyLabel: null, creditNeuron: "0", spentNeuron: "0", creditedFromEarningsNeuron: "0", lastRequestId: null });
   });
 
   r.get("/api/agents/:label/inference", (req, res) => {
-    res.json(agentReceipts(agentByName(String(req.params.label))));
+    const agent = agentByName(String(req.params.label));
+    res.json(isCreator(req, agent) ? agentReceipts(agent) : []);
   });
 
   // Provider-only settings: model, system prompt, own key, MCP and HTTP tools.

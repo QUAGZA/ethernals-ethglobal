@@ -19,6 +19,7 @@
     "deploy:ledger": "pnpm --filter @ethernals/server exec tsx scripts/deploy-ledger.ts",
     "ens:setup": "pnpm --filter @ethernals/server exec tsx scripts/ens-setup.ts",
     "dev:public": "node scripts/dev-public.mjs",
+    "dev:public:prod": "node scripts/dev-public.mjs --prod",
     "ens:sync": "pnpm --filter @ethernals/server exec tsx scripts/ens-sync.ts",
     "arena:prepare": "pnpm --filter @ethernals/server exec tsx scripts/arena-prepare.ts",
     "agent:hire": "pnpm --filter @ethernals/server exec tsx scripts/agent-hire.ts",

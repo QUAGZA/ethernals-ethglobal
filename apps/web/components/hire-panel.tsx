@@ -329,6 +329,14 @@ export function HirePanel({
               <p className="m-0 text-[11px] leading-[1.5] opacity-70">
                 Paid by your buyer agent {me.buyerAgent.ensName} · balance {usdc2(me.buyerAgent.usdcBalance)} USDC ·
                 budget left {usdc2(me.buyerAgent.budgetRemaining)} USDC
+                {Number(me.buyerAgent.budgetRemaining) < Number(agent.price) && (
+                  <>
+                    {" "}·{" "}
+                    <Link className="border-b" href="/me">
+                      Add funds from your wallet on /me
+                    </Link>
+                  </>
+                )}
               </p>
             )}
             {formError && <p className="m-0 text-bad">{formError}</p>}

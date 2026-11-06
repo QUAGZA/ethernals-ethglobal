@@ -29,6 +29,7 @@ interface PublishedConfig {
   tools?: { kind: "mcp" | "http"; name: string; url: string; description?: string; schema?: string | null }[];
 }
 interface PublishedSecrets {
+  config?: PublishedConfig;
   zgApiKey?: string | null;
   toolAuth?: Record<string, string>;
 }
@@ -64,22 +65,14 @@ async function adoptOne(person: PersonRow, row: ChainAgentRow): Promise<boolean>
   });
 
   // Restore its setup from ENS: public config plus the secrets sealed with the root secret.
-  const [rawConfig, rawSecrets] = await Promise.all([
-    readText(row.name, ENS_KEYS.config).catch(() => null),
-    readText(row.name, ENS_KEYS.secrets).catch(() => null),
-  ]);
-  let published: PublishedConfig = {};
+  const rawSecrets = await readText(row.name, ENS_KEYS.secrets).catch(() => null);
   let secrets: PublishedSecrets = {};
-  try {
-    if (rawConfig) published = JSON.parse(rawConfig);
-  } catch {
-    /* no usable config: the agent keeps defaults */
-  }
   try {
     if (rawSecrets) secrets = JSON.parse(decryptSecret(rawSecrets));
   } catch {
-    /* sealed with a different root secret: skip the secrets */
+    /* sealed with a different root secret: the agent keeps defaults */
   }
+  const published: PublishedConfig = secrets.config ?? {};
   upsertBrain({
     agent_key: agent.key,
     api_key_enc: secrets.zgApiKey ? encryptSecret(secrets.zgApiKey) : null,
