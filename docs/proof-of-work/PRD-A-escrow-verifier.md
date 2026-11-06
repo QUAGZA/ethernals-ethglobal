@@ -234,7 +234,7 @@ Agents should pay validators too. Add `POST /verify-paid` to the verifier:
 
 ### A8. Stretch (P2)
 
-- **Reveal after settlement:** `GET /jobs/:jobId/tests` returns the hidden tests after settlement, so anyone can audit them against `testsHash`.
+- **Reveal after settlement (built):** `GET /jobs/:jobId/tests` returns the hidden tests once the outcome is on-chain. It needs the verifier token, and the public route is the server's `GET /api/tasks/:id/tests.json`, which also keeps template tests hidden. Anyone can audit the files against `testsHash`.
 - **IPFS pinning** of the result JSON (keep the HTTP URL as the fallback).
 
 ## 5. Milestones (IST)

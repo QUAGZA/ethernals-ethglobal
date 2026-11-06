@@ -44,6 +44,7 @@ export function task(client: PersonRow, buyer: AgentRow, fields: Partial<TaskRow
     spec_hash: `0x${"a".repeat(64)}`,
     tests_id: "tests",
     tests_hash: `0x${"b".repeat(64)}`,
+    calibration_json: null,
     bounty: "2000000",
     deadline: new Date(Date.now() + 3600_000).toISOString(),
     status: "verifying",

@@ -30,6 +30,8 @@ const TYPE_LABELS: Record<string, string> = {
   "inference.receipt": "0G",
   "spend.allowed": "SPEND",
   "spend.blocked": "BLOCKED",
+  "sandbox.step": "SANDBOX",
+  "sandbox.done": "SANDBOX",
   info: "INFO",
 };
 

@@ -6,6 +6,8 @@ export const RECORD_PREFIX = "ethernals";
 
 export const ENS_KEYS = {
   description: "description",
+  label: `${RECORD_PREFIX}.label`, // the agent's label, so a name can be indexed without a list
+  hedera: `${RECORD_PREFIX}.hedera`, // the agent's Hedera account id
   endpoint: "agent-endpoint[x402]",
   context: "agent-context",
   provider: `${RECORD_PREFIX}.provider`,
@@ -17,6 +19,13 @@ export const ENS_KEYS = {
   hiresTotal: `${RECORD_PREFIX}.hires.total`,
   ledger: `${RECORD_PREFIX}.ledger`,
   updated: `${RECORD_PREFIX}.updated`,
+  // agent config published on-chain so any host holding the platform root secret can run the agent
+  config: `${RECORD_PREFIX}.config`, // legacy and always empty now: nothing readable is published about an agent's setup
+  secrets: `${RECORD_PREFIX}.secrets`, // the whole setup (model, system prompt, tools, keys), sealed with the platform root secret
+  // handle claims, written on `<handle>.people.<parent>`
+  nullhash: `${RECORD_PREFIX}.nullhash`, // HMAC of the person's World ID nullifier (never the nullifier)
+  owner: `${RECORD_PREFIX}.owner`, // the person's public provider key
+  pid: `${RECORD_PREFIX}.pid`, // the person's id, encrypted with the platform root secret
   // proof-of-work tasks
   capabilities: `${RECORD_PREFIX}.capabilities`, // e.g. "code-fix:python"
   validation: `${RECORD_PREFIX}.validation`, // e.g. "hidden-tests:docker"

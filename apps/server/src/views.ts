@@ -12,6 +12,7 @@ import {
   sepoliaTxUrl,
   type AgentDetail,
   type AgentSummary,
+  type CalibrationReport,
   type DuelView,
   type TaskLinks,
   type TaskSpec,
@@ -21,14 +22,17 @@ import {
   type HireView,
   type PersonPublic,
   type Reason,
+  TASK_TYPES,
 } from "@ethernals/shared";
 import { providerKeyShort } from "./agents";
 import { taskReceipts } from "./brain";
+import { chainHiresFor } from "./chain-history";
 import { config } from "./config";
 import {
   countSpecialistTasks,
   getAgent,
   getHire,
+  getBrain,
   getPerson,
   kvGet,
   listAgentsOfPerson,
@@ -36,31 +40,64 @@ import {
   listSpendEventsForTask,
   listTasksOfDuel,
   type AgentRow,
+  type ChainAgentRow,
   type HireRow,
   type PersonRow,
   type TaskRow,
 } from "./db";
 import { getStats, type LedgerStats } from "./ledger";
 import { spendEventView } from "./spend";
-import { canRefund, refundEligibleAt } from "./task-service";
+import { areTestsPublic, canRefund, refundEligibleAt } from "./task-service";
 
 const statsCache = new Map<string, { stats: LedgerStats; at: number }>();
+const statsInflight = new Map<string, Promise<LedgerStats | null>>();
+const STATS_FRESH_MS = 30_000;
+const STATS_COLD_WAIT_MS = 2_500;
 
+/** One deduplicated chain read per agent; failures keep whatever we already had. */
+function refreshStats(agent: AgentRow): Promise<LedgerStats | null> {
+  let p = statsInflight.get(agent.key);
+  if (!p) {
+    p = getStats(agent.key as Hex)
+      .then((s) => {
+        statsCache.set(agent.key, { stats: s, at: Date.now() });
+        return s;
+      })
+      .catch(() => statsCache.get(agent.key)?.stats ?? null)
+      .finally(() => statsInflight.delete(agent.key));
+    statsInflight.set(agent.key, p);
+  }
+  return p;
+}
+
+/**
+ * Stale-while-revalidate: the Hedera RPC can take many seconds, so pages never wait on it for long.
+ * A cached value is returned at once (and refreshed in the background); a cold agent waits at most 2.5 s.
+ */
 async function stats(agent: AgentRow): Promise<LedgerStats | null> {
   if (agent.kind !== "seller" || !agent.ledger_registered || !config.hedera.ledgerAddressOrNull()) return null;
   const cached = statsCache.get(agent.key);
-  if (cached && Date.now() - cached.at < 3000) return cached.stats;
-  try {
-    const s = await getStats(agent.key as Hex);
-    statsCache.set(agent.key, { stats: s, at: Date.now() });
-    return s;
-  } catch {
-    return cached?.stats ?? null;
+  if (cached) {
+    if (Date.now() - cached.at > STATS_FRESH_MS) void refreshStats(agent);
+    return cached.stats;
   }
+  const pending = refreshStats(agent);
+  return Promise.race([pending, new Promise<null>((resolve) => setTimeout(() => resolve(null), STATS_COLD_WAIT_MS))]);
 }
 
+/** Marks an agent's stats stale (kept for display) so the next view refreshes them. */
 export function invalidateStats(agentKey: string): void {
-  statsCache.delete(agentKey);
+  const cached = statsCache.get(agentKey);
+  if (cached) cached.at = 0;
+}
+
+/** Fills the cache for every seller in the background, a few at a time, so the first page load is fast. */
+export function warmStats(agents: AgentRow[]): void {
+  const queue = agents.filter((a) => a.kind === "seller" && a.ledger_registered);
+  const worker = async () => {
+    for (let a = queue.shift(); a; a = queue.shift()) await refreshStats(a);
+  };
+  for (let i = 0; i < 3; i++) void worker();
 }
 
 export function personView(p: PersonRow): PersonPublic {
@@ -83,6 +120,7 @@ export async function agentView(agent: AgentRow): Promise<AgentSummary> {
     label: agent.label,
     kind: agent.kind,
     taskType: agent.task_type,
+    modelType: agent.kind === "seller" ? ((getBrain(agent.key)?.model_type as AgentSummary["modelType"]) ?? "text") : undefined,
     description: agent.description,
     ownerHandle: owner?.handle ?? "?",
     providerKeyShort: providerKeyShort(agent.person_id),
@@ -96,6 +134,45 @@ export async function agentView(agent: AgentRow): Promise<AgentSummary> {
     hiresTotal: s?.hiresTotal ?? 0,
     hiresCounted: s?.hiresCounted ?? 0,
     createdAt: agent.created_at,
+  };
+}
+
+/** An agent found on-chain that another server hosts. Reputation comes straight from the ledger. */
+export async function remoteAgentView(row: ChainAgentRow): Promise<AgentSummary> {
+  const s = await stats({ key: row.key, kind: "seller", ledger_registered: 1 } as AgentRow);
+  const taskType = TASK_TYPES.find((t) => t === row.task_type) ?? null;
+  const base = s?.basePrice ?? 0n;
+  return {
+    key: row.key,
+    ensName: row.name,
+    label: row.label,
+    kind: "seller",
+    taskType,
+    description: row.description,
+    ownerHandle: "on-chain",
+    providerKeyShort: row.provider ?? "?",
+    hederaAccountId: row.hedera_account ?? "",
+    evmAddress: "",
+    endpoint: row.endpoint,
+    basePrice: formatUnits6(base),
+    price: formatUnits6(s ? s.price : base),
+    score: formatScore(s ? s.scoreX1e6 : scoreX1e6(0, 0)),
+    votes: s?.votes ?? 0,
+    hiresTotal: s?.hiresTotal ?? 0,
+    hiresCounted: s?.hiresCounted ?? 0,
+    createdAt: row.checked_at,
+    remote: true,
+    endpointStatus: row.status,
+  };
+}
+
+export async function remoteAgentDetail(row: ChainAgentRow): Promise<AgentDetail> {
+  return {
+    ...(await remoteAgentView(row)),
+    hires: (await chainHiresFor(row.key)).map((h) => ({ ...h, agentEnsName: row.name })),
+    ensAppUrl: ensAppUrl(row.name),
+    hederaAccountUrl: row.hedera_account ? hashscanAccountUrl(row.hedera_account) : "",
+    siblingAgents: [],
   };
 }
 
@@ -160,6 +237,8 @@ export function taskView(t: TaskRow): TaskDetailView {
     spec: JSON.parse(t.spec_json) as TaskSpec,
     specHash: t.spec_hash as TaskView["specHash"],
     testsHash: t.tests_hash as TaskView["testsHash"],
+    calibration: t.calibration_json ? (JSON.parse(t.calibration_json) as CalibrationReport) : null,
+    testsUrl: areTestsPublic(t) ? `/api/tasks/${t.id}/tests.json` : null,
     bounty: formatUnits6(BigInt(t.bounty)),
     deadline: t.deadline,
     status: t.status,

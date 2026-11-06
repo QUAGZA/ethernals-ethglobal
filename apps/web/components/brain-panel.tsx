@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { api, type AgentDetailPlus } from "@/lib/api";
+import { useApp } from "@/lib/app-context";
 import { neuronTo0g, shortHex, usdc2 } from "@/lib/format";
 import { useDebounced, useLoad } from "@/lib/hooks";
 import { useEvents } from "@/lib/use-events";
@@ -12,6 +13,8 @@ import { ReceiptTable } from "./task-bits";
 const BACKENDS = { "0g-router": "0G Compute", anthropic: "Anthropic (development)", offline: "Offline (development)" };
 
 export function BrainPanel({ agent }: { agent: AgentDetailPlus }) {
+  const { me } = useApp();
+  const isOwner = Boolean(me?.person && me.person.handle === agent.ownerHandle);
   const loader = useCallback(async () => {
     const [brain, receipts] = await Promise.all([api.agentBrain(agent.label), api.agentInference(agent.label)]);
     return { brain, receipts };
@@ -36,12 +39,12 @@ export function BrainPanel({ agent }: { agent: AgentDetailPlus }) {
         <>
           <div className="grid grid-cols-4 gap-5 max-md:grid-cols-2">
             <Stat label="Backend" value={`${BACKENDS[brain.backend]}${brain.network ? ` · ${brain.network}` : ""}`} />
-            <Stat label="Model" value={<span className="text-[12px] break-all">{brain.model}</span>} />
-            <Stat label="Key" value={brain.keyLabel ? "Its own key" : "Shared key"} />
+            {isOwner && <Stat label="Model" value={<span className="text-[12px] break-all">{brain.model}</span>} />}
+            {isOwner && <Stat label="Key" value={brain.keyLabel ? "Its own key" : "Shared key"} />}
             <Stat label="Thoughts" value={brain.receipts} />
-            <Stat label="Credit (0G)" value={neuronTo0g(brain.creditNeuron)} />
-            <Stat label="Spent (0G)" value={neuronTo0g(brain.spentNeuron)} />
-            <Stat label="From earnings (0G)" value={neuronTo0g(brain.creditedFromEarningsNeuron)} />
+            {isOwner && <Stat label="Credit (0G)" value={neuronTo0g(brain.creditNeuron)} />}
+            {isOwner && <Stat label="Spent (0G)" value={neuronTo0g(brain.spentNeuron)} />}
+            {isOwner && <Stat label="From earnings (0G)" value={neuronTo0g(brain.creditedFromEarningsNeuron)} />}
             <Stat label="Earned" value={`${usdc2(brain.earnedUsdc)} USDC`} />
             {agent.taskType === "code-fix" && (
               <>
@@ -50,16 +53,18 @@ export function BrainPanel({ agent }: { agent: AgentDetailPlus }) {
                 <Stat label="ERC-8004 id" value={agent.erc8004AgentId ?? "—"} />
               </>
             )}
-            {brain.lastRequestId && <Stat label="Last request id" value={<span className="text-[12px]">{shortHex(brain.lastRequestId, 10)}</span>} />}
+            {isOwner && brain.lastRequestId && <Stat label="Last request id" value={<span className="text-[12px]">{shortHex(brain.lastRequestId, 10)}</span>} />}
           </div>
-          {(data.data?.receipts.length ?? 0) > 0 && (
+          {isOwner && (data.data?.receipts.length ?? 0) > 0 && (
             <div className="mt-5">
               <p className="eyebrow m-0 mb-2 opacity-60">Recent receipts</p>
               <ReceiptTable receipts={data.data!.receipts.slice(0, 8)} showPurpose />
             </div>
           )}
           <p className="m-0 mt-4 text-[11px] leading-[1.5] opacity-70">
-            Credit is internal accounting of what this agent earned and spent. The Router balance is the platform&apos;s treasury.
+            {isOwner
+              ? "Credit is internal accounting of what this agent earned and spent. The Router balance is the platform's treasury."
+              : "Model, keys and settings are visible only to the agent's creator."}
           </p>
         </>
       )}

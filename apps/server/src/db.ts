@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { SpendGuardKind, TaskStatus } from "@ethernals/shared";
+import type { SandboxRefusal, SandboxRunStatus, SpendGuardKind, TaskStatus, TaskType } from "@ethernals/shared";
 import { config } from "./config";
 
 export interface PersonRow {
@@ -27,7 +27,7 @@ export interface AgentRow {
   evm_address: string;
   enc_private_key: string;
   base_price: string; // atomic units
-  task_type: "summarize" | "translate" | "code-fix" | null;
+  task_type: TaskType | null;
   description: string;
   budget_remaining: string; // atomic units (buyer agents)
   ledger_registered: number;
@@ -72,6 +72,8 @@ export interface TaskRow {
   spec_hash: string | null;
   tests_id: string | null;
   tests_hash: string | null;
+  /** The verifier's CalibrationReport: counts only. Set on every custom task since the check began, and on no template. */
+  calibration_json: string | null;
   bounty: string; // atomic tUSDC
   deadline: string;
   status: TaskStatus;
@@ -104,6 +106,37 @@ export interface BrainRow {
   earned_units: string;
   credited_from_earnings_neuron: string;
   last_request_id: string | null;
+  /** text | image | decision | embedding | video (default text). */
+  model_type?: string;
+  /** Provider-written system prompt, prepended to every task this agent thinks about. */
+  system_prompt?: string | null;
+}
+
+export interface ChainAgentRow {
+  name: string;
+  label: string;
+  key: string;
+  description: string;
+  endpoint: string | null;
+  provider: string | null;
+  task_type: string | null;
+  brain: string | null;
+  hedera_account: string | null;
+  status: "online" | "offline" | "private" | "unknown";
+  records_at: string;
+  checked_at: string;
+}
+
+export interface AgentToolRow {
+  id: string;
+  agent_key: string;
+  kind: "mcp" | "http";
+  name: string;
+  url: string;
+  description: string;
+  schema_json: string | null;
+  auth_enc: string | null;
+  created_at: string;
 }
 
 export interface ReceiptRow {
@@ -143,6 +176,35 @@ export interface SpendEventRow {
   created_at: string;
 }
 
+/** Metadata only: the goal is stored as a hash, and results are never stored. */
+export interface SandboxRunRow {
+  id: string;
+  lead_agent_key: string;
+  person_id: string;
+  goal_hash: string;
+  budget_units: string;
+  spent_units: string;
+  share_with_recruits: number;
+  brain: "0g-router" | "offline";
+  status: SandboxRunStatus;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface SandboxStepRow {
+  id: string;
+  run_id: string;
+  n: number;
+  kind: "thought" | "recruit" | "refused" | "finish";
+  agent_key: string | null;
+  amount_units: string | null;
+  refusal: SandboxRefusal | null;
+  request_id: string | null;
+  hire_id: string | null;
+  created_at: string;
+}
+
 export interface MandateRow {
   id: string;
   hire_id: string;
@@ -164,6 +226,13 @@ export function getDb(): DatabaseSync {
 }
 
 function migrate(d: DatabaseSync): void {
+  // A local DB created on another branch may hold an older-shaped inference_receipts
+  // table (no agent_key). Park it under a legacy name so the new schema can be created.
+  const receiptCols = d.prepare("PRAGMA table_info(inference_receipts)").all() as { name: string }[];
+  if (receiptCols.length > 0 && !receiptCols.some((c) => c.name === "agent_key")) {
+    d.exec("DROP INDEX IF EXISTS receipts_agent; DROP INDEX IF EXISTS receipts_task;");
+    d.exec(`ALTER TABLE inference_receipts RENAME TO inference_receipts_legacy_${Date.now()}`);
+  }
   d.exec(`
     CREATE TABLE IF NOT EXISTS persons (
       id TEXT PRIMARY KEY,
@@ -230,6 +299,25 @@ function migrate(d: DatabaseSync): void {
       funded INTEGER NOT NULL DEFAULT 0,
       used INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS proofs (
+      id TEXT PRIMARY KEY,
+      agent TEXT NOT NULL,
+      parent_proof_id TEXT,
+      category TEXT NOT NULL,
+      title TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      chain_task_id TEXT,
+      patch_hash TEXT NOT NULL,
+      receipt_json TEXT NOT NULL,
+      receipt_hash TEXT NOT NULL,
+      validator_json TEXT NOT NULL,
+      settlement_status TEXT NOT NULL,
+      settle_tx TEXT,
+      result_url TEXT,
+      log_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS proofs_agent ON proofs(agent);
     CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -250,6 +338,7 @@ function migrate(d: DatabaseSync): void {
       spec_hash TEXT,
       tests_id TEXT,
       tests_hash TEXT,
+      calibration_json TEXT,
       bounty TEXT NOT NULL,
       deadline TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -321,10 +410,74 @@ function migrate(d: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS spend_person ON spend_events(person_id, created_at);
+    CREATE TABLE IF NOT EXISTS sandbox_runs (
+      id TEXT PRIMARY KEY,
+      lead_agent_key TEXT NOT NULL,
+      person_id TEXT NOT NULL,
+      goal_hash TEXT NOT NULL,
+      budget_units TEXT NOT NULL,
+      spent_units TEXT NOT NULL DEFAULT '0',
+      share_with_recruits INTEGER NOT NULL,
+      brain TEXT NOT NULL,
+      status TEXT NOT NULL,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS sandbox_steps (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      n INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      agent_key TEXT,
+      amount_units TEXT,
+      refusal TEXT,
+      request_id TEXT,
+      hire_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS sandbox_steps_run ON sandbox_steps(run_id, n);
   `);
   const agentColumns = d.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
   if (!agentColumns.some((c) => c.name === "strategy")) {
     d.exec("ALTER TABLE agents ADD COLUMN strategy TEXT NOT NULL DEFAULT 'careful'");
+  }
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS agent_tools (
+      id TEXT PRIMARY KEY,
+      agent_key TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      schema_json TEXT,
+      auth_enc TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS agent_tools_agent ON agent_tools(agent_key);
+  `);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS chain_agents (
+      name TEXT PRIMARY KEY,
+      label TEXT NOT NULL UNIQUE,
+      key TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      endpoint TEXT,
+      provider TEXT,
+      task_type TEXT,
+      brain TEXT,
+      hedera_account TEXT,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      records_at TEXT NOT NULL,
+      checked_at TEXT NOT NULL
+    );
+  `);
+  const brainColumns = d.prepare("PRAGMA table_info(agent_brain)").all() as { name: string }[];
+  if (!brainColumns.some((c) => c.name === "model_type")) d.exec("ALTER TABLE agent_brain ADD COLUMN model_type TEXT NOT NULL DEFAULT 'text'");
+  if (!brainColumns.some((c) => c.name === "system_prompt")) d.exec("ALTER TABLE agent_brain ADD COLUMN system_prompt TEXT");
+  const taskColumns = d.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+  if (!taskColumns.some((c) => c.name === "calibration_json")) {
+    d.exec("ALTER TABLE tasks ADD COLUMN calibration_json TEXT");
   }
 }
 
@@ -550,6 +703,17 @@ export function listUnratedSettledTasks(): TaskRow[] {
     .prepare("SELECT * FROM tasks WHERE status IN ('passed', 'failed') AND rating_submitted = 0 AND hire_id IS NOT NULL")
     .all() as unknown as TaskRow[];
 }
+/** Whether a task that could still be worked on uses these tests. A failed create never went on-chain, so it doesn't count. */
+export function isTestsInUse(testsId: string, exceptTaskId: string): boolean {
+  return Boolean(
+    getDb()
+      .prepare(
+        `SELECT 1 FROM tasks WHERE tests_id = ? AND id != ?
+         AND status NOT IN ('passed', 'failed', 'refunded') AND NOT (status = 'error' AND chain_task_id IS NULL) LIMIT 1`,
+      )
+      .get(testsId, exceptTaskId),
+  );
+}
 export function listTasksOfDuel(duelId: string): TaskRow[] {
   return getDb().prepare("SELECT * FROM tasks WHERE duel_id = ? ORDER BY rowid").all(duelId) as unknown as TaskRow[];
 }
@@ -580,17 +744,32 @@ export function upsertBrain(row: BrainRow): BrainRow {
   getDb()
     .prepare(
       `INSERT INTO agent_brain (agent_key, api_key_enc, key_label, model, credit_neuron, spent_neuron, earned_units,
-        credited_from_earnings_neuron, last_request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        credited_from_earnings_neuron, last_request_id, model_type, system_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(agent_key) DO UPDATE SET api_key_enc = excluded.api_key_enc, key_label = excluded.key_label,
         model = excluded.model, credit_neuron = excluded.credit_neuron, spent_neuron = excluded.spent_neuron,
         earned_units = excluded.earned_units, credited_from_earnings_neuron = excluded.credited_from_earnings_neuron,
-        last_request_id = excluded.last_request_id`,
+        last_request_id = excluded.last_request_id, model_type = excluded.model_type, system_prompt = excluded.system_prompt`,
     )
     .run(
       row.agent_key, row.api_key_enc, row.key_label, row.model, row.credit_neuron, row.spent_neuron, row.earned_units,
-      row.credited_from_earnings_neuron, row.last_request_id,
+      row.credited_from_earnings_neuron, row.last_request_id, row.model_type ?? "text", row.system_prompt ?? null,
     );
   return getBrain(row.agent_key)!;
+}
+
+// ---------- agent tools (MCP servers and HTTP tools) ----------
+export function listAgentTools(agentKey: string): AgentToolRow[] {
+  return getDb().prepare("SELECT * FROM agent_tools WHERE agent_key = ? ORDER BY created_at").all(agentKey) as unknown as AgentToolRow[];
+}
+export function insertAgentTool(t: Omit<AgentToolRow, "created_at">): AgentToolRow {
+  const createdAt = now();
+  getDb()
+    .prepare("INSERT INTO agent_tools (id, agent_key, kind, name, url, description, schema_json, auth_enc, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(t.id, t.agent_key, t.kind, t.name, t.url, t.description, t.schema_json, t.auth_enc, createdAt);
+  return { ...t, created_at: createdAt };
+}
+export function deleteAgentTool(id: string, agentKey: string): boolean {
+  return Number(getDb().prepare("DELETE FROM agent_tools WHERE id = ? AND agent_key = ?").run(id, agentKey).changes) > 0;
 }
 export function resetBrainCredit(seedNeuron: bigint): void {
   getDb()
@@ -663,13 +842,119 @@ export function countConfirmedSpends(personId: string, guard: SpendGuardKind, si
   return Number(row.n);
 }
 
-/** Clears everything a demo run produces: tasks, duels, receipts and spend events. Keeps agents and brain keys. */
+// ---------- sandbox runs ----------
+export function insertSandboxRun(r: Omit<SandboxRunRow, "created_at" | "finished_at" | "spent_units" | "error" | "status">): SandboxRunRow {
+  getDb()
+    .prepare(
+      `INSERT INTO sandbox_runs (id, lead_agent_key, person_id, goal_hash, budget_units, share_with_recruits, brain, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
+    )
+    .run(r.id, r.lead_agent_key, r.person_id, r.goal_hash, r.budget_units, r.share_with_recruits, r.brain, now());
+  return getSandboxRun(r.id)!;
+}
+export function getSandboxRun(id: string): SandboxRunRow | undefined {
+  return getDb().prepare("SELECT * FROM sandbox_runs WHERE id = ?").get(id) as SandboxRunRow | undefined;
+}
+export function updateSandboxRun(id: string, fields: Partial<Pick<SandboxRunRow, "spent_units" | "status" | "error" | "finished_at">>): SandboxRunRow {
+  const entries = Object.entries(fields);
+  if (entries.length > 0) {
+    getDb()
+      .prepare(`UPDATE sandbox_runs SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE id = ?`)
+      .run(...entries.map(([, v]) => v as string | null), id);
+  }
+  return getSandboxRun(id)!;
+}
+export function listSandboxRuns(limit = 30): SandboxRunRow[] {
+  return getDb().prepare("SELECT * FROM sandbox_runs ORDER BY created_at DESC, rowid DESC LIMIT ?").all(limit) as unknown as SandboxRunRow[];
+}
+export function findRunningSandboxRun(leadAgentKey: string): SandboxRunRow | undefined {
+  return getDb().prepare("SELECT * FROM sandbox_runs WHERE lead_agent_key = ? AND status = 'running'").get(leadAgentKey) as SandboxRunRow | undefined;
+}
+/** Runs live in memory, so any still marked running when the server starts have ended. */
+export function failInterruptedSandboxRuns(): void {
+  getDb()
+    .prepare("UPDATE sandbox_runs SET status = 'failed', error = 'The server restarted during this run.', finished_at = ? WHERE status = 'running'")
+    .run(now());
+}
+export function insertSandboxStep(s: Omit<SandboxStepRow, "created_at">): SandboxStepRow {
+  const row: SandboxStepRow = { ...s, created_at: now() };
+  getDb()
+    .prepare("INSERT INTO sandbox_steps (id, run_id, n, kind, agent_key, amount_units, refusal, request_id, hire_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(s.id, s.run_id, s.n, s.kind, s.agent_key, s.amount_units, s.refusal, s.request_id, s.hire_id, row.created_at);
+  return row;
+}
+export function listSandboxSteps(runId: string): SandboxStepRow[] {
+  return getDb().prepare("SELECT * FROM sandbox_steps WHERE run_id = ? ORDER BY n").all(runId) as unknown as SandboxStepRow[];
+}
+
+/** Clears everything a demo run produces: tasks, duels, sandbox runs, receipts and spend events. Keeps agents and brain keys. */
 export function clearTaskData(): void {
-  getDb().exec("DELETE FROM tasks; DELETE FROM duels; DELETE FROM inference_receipts; DELETE FROM spend_events;");
+  getDb().exec("DELETE FROM tasks; DELETE FROM duels; DELETE FROM sandbox_steps; DELETE FROM sandbox_runs; DELETE FROM inference_receipts; DELETE FROM spend_events;");
 }
 
 /** Wipes hires, mandates and agents (keeps persons). Used by `pnpm demo:reset`. */
 export function resetDemoData(): void {
   clearTaskData();
   getDb().exec("DELETE FROM agent_brain; DELETE FROM mandates; DELETE FROM hires; DELETE FROM agents; DELETE FROM arena_wallets; DELETE FROM kv;");
+}
+
+
+// ---------------------------------------------------------------- validation proofs (receipts live here, hashes on-chain)
+export interface ProofRow {
+  id: string;
+  agent: string;
+  parent_proof_id: string | null;
+  category: string;
+  title: string;
+  job_id: string;
+  chain_task_id: string | null;
+  patch_hash: string;
+  receipt_json: string;
+  receipt_hash: string;
+  validator_json: string;
+  settlement_status: "paid" | "refunded" | "none";
+  settle_tx: string | null;
+  result_url: string | null;
+  log_json: string;
+  created_at: string;
+}
+export function insertProof(p: Omit<ProofRow, "created_at">): ProofRow {
+  const created_at = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO proofs (id, agent, parent_proof_id, category, title, job_id, chain_task_id, patch_hash, receipt_json, receipt_hash, validator_json, settlement_status, settle_tx, result_url, log_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(p.id, p.agent, p.parent_proof_id, p.category, p.title, p.job_id, p.chain_task_id, p.patch_hash, p.receipt_json, p.receipt_hash, p.validator_json, p.settlement_status, p.settle_tx, p.result_url, p.log_json, created_at);
+  return { ...p, created_at };
+}
+export function getProof(id: string): ProofRow | undefined {
+  return getDb().prepare("SELECT * FROM proofs WHERE id = ?").get(id) as ProofRow | undefined;
+}
+export function listProofs(limit = 50): ProofRow[] {
+  return getDb().prepare("SELECT * FROM proofs ORDER BY created_at DESC LIMIT ?").all(limit) as unknown as ProofRow[];
+}
+export function listProofsForAgent(agent: string): ProofRow[] {
+  return getDb().prepare("SELECT * FROM proofs WHERE agent = ? ORDER BY created_at DESC").all(agent) as unknown as ProofRow[];
+}
+export function setProofParent(id: string, parentId: string): void {
+  getDb().prepare("UPDATE proofs SET parent_proof_id = ? WHERE id = ?").run(parentId, id);
+}
+
+// ---------- chain index cache (rebuildable from ENS and the HireLedger) ----------
+export function listChainAgents(): ChainAgentRow[] {
+  return getDb().prepare("SELECT * FROM chain_agents ORDER BY label").all() as unknown as ChainAgentRow[];
+}
+export function getChainAgent(nameOrLabel: string): ChainAgentRow | undefined {
+  return getDb().prepare("SELECT * FROM chain_agents WHERE label = ? OR name = ?").get(nameOrLabel, nameOrLabel) as unknown as ChainAgentRow | undefined;
+}
+export function upsertChainAgent(r: ChainAgentRow): void {
+  getDb()
+    .prepare(
+      `INSERT INTO chain_agents (name, label, key, description, endpoint, provider, task_type, brain, hedera_account, status, records_at, checked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(name) DO UPDATE SET label = excluded.label, key = excluded.key, description = excluded.description,
+         endpoint = excluded.endpoint, provider = excluded.provider, task_type = excluded.task_type, brain = excluded.brain,
+         hedera_account = excluded.hedera_account, status = excluded.status, records_at = excluded.records_at, checked_at = excluded.checked_at`,
+    )
+    .run(r.name, r.label, r.key, r.description, r.endpoint, r.provider, r.task_type, r.brain, r.hedera_account, r.status, r.records_at, r.checked_at);
 }

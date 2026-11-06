@@ -4,7 +4,26 @@
  */
 import type { Reason } from "./reasons";
 
-export type TaskType = "summarize" | "translate" | "code-fix";
+/** "code-fix" is the stored id of the Code gen type: it is written in ENS records, escrow specs and the verifier. */
+export const TASK_TYPES = ["image-gen", "video-gen", "code-fix", "summarize", "translate"] as const;
+export type TaskType = (typeof TASK_TYPES)[number];
+
+export const TASK_TYPE_LABELS: Record<TaskType, string> = {
+  "image-gen": "Image gen",
+  "video-gen": "Video gen",
+  "code-fix": "Code gen",
+  summarize: "Summarize",
+  translate: "Translate",
+};
+
+/** The kind of 0G model each task type thinks on. */
+export function modelTypeFor(taskType: TaskType): "text" | "image" | "video" {
+  if (taskType === "image-gen") return "image";
+  return taskType === "video-gen" ? "video" : "text";
+}
+
+/** Used when a provider leaves the model blank. */
+export const DEFAULT_MEDIA_MODELS = { image: "minimax-image-01", video: "bytedance/seedance-2.0-mini" } as const;
 export type AgentKind = "seller" | "buyer";
 export type HumanMode = "idkit" | "agentkit" | "dev";
 
@@ -27,6 +46,8 @@ export interface PublicConfig {
   hederaNetwork: "testnet";
   paymentAsset: "USDC" | "HBAR";
   ledgerAddress: string | null;
+  /** The Hedera token id of the payment asset (USDC), for sending funds to a buyer agent. */
+  usdcTokenId?: string;
   /** Added by the proof-of-work build (all optional so older servers still type-check). */
   zeroG?: { enabled: boolean; network: "testnet" | "mainnet"; model: string };
   namera?: { enabled: boolean };
@@ -65,6 +86,12 @@ export interface AgentSummary {
   hiresTotal: number;
   hiresCounted: number;
   createdAt: string;
+  /** Hosted here only: the kind of model it thinks on. */
+  modelType?: "text" | "image" | "decision" | "embedding" | "video";
+  /** True for an agent found on-chain that another server hosts (no local settings, hire only). */
+  remote?: boolean;
+  /** Remote agents only: whether its x402 endpoint answered the last probe. */
+  endpointStatus?: "online" | "offline" | "private" | "unknown";
 }
 
 export interface HireView {
@@ -146,6 +173,14 @@ export interface CreateAgentRequest {
   taskType: TaskType;
   basePrice: string; // e.g. "0.10"
   description?: string;
+  /** Optional: this agent's own 0G Router key (sk-...). Stored encrypted on the server, never returned. */
+  zgApiKey?: string;
+  /** The 0G model family: text (default), image, decision, embedding or video. */
+  modelType?: "text" | "image" | "decision" | "embedding" | "video";
+  /** 0G Router model name. Required for non-text types; text defaults to the platform pick. */
+  model?: string;
+  /** The agent's own system prompt. */
+  systemPrompt?: string;
 }
 
 export interface Consent {
@@ -153,6 +188,8 @@ export interface Consent {
   forward: boolean;
   /** Max USDC the agent may spend on sub-hires for this hire. */
   subBudget: string;
+  /** Text agents only: how many marketplace agents it may hire as assistants. 0 or missing turns this off. */
+  maxAssistants?: number;
 }
 
 /** POST /api/hires */
@@ -168,6 +205,8 @@ export interface SubHireOutcome {
   reason?: Reason | string;
   agentEnsName?: string;
   hireId?: string;
+  /** Assistants only: USDC paid over x402. */
+  amount?: string;
   paymentUrl?: string | null;
 }
 
@@ -178,6 +217,8 @@ export interface HireResponse {
   paymentTxId: string | null;
   paymentUrl: string | null;
   subHire: SubHireOutcome | null;
+  /** One entry per assistant the agent tried to hire. */
+  assistants?: SubHireOutcome[];
 }
 
 /** POST /api/hires/:id/rate */
@@ -217,6 +258,8 @@ export type EventType =
   | "inference.receipt" // a 0G Compute call finished (data.requestId, data.agentEnsName)
   | "spend.allowed" // Namera/guard confirmed a spend
   | "spend.blocked" // Namera/guard refused a spend (data.rule, data.reason)
+  | "sandbox.step" // a lead agent thought, recruited or was refused (data.runId; metadata only)
+  | "sandbox.done" // a run ended (data.runId, data.status)
   | "info";
 
 /** One message on GET /api/events (Server-Sent Events, `data:` is this JSON). */

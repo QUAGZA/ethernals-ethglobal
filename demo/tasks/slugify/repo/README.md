@@ -1,0 +1,7 @@
+# textkit
+
+Tiny text helpers.
+
+## Issue
+
+slugify() breaks on real titles. Punctuation stays in, repeated spaces turn into repeated hyphens, and accented letters are kept. A slug must contain only a-z, 0-9 and single hyphens, with no hyphen at the start or end; accented letters become their plain letter (e.g. e-acute becomes e). An input with no letters or digits gives an empty string.

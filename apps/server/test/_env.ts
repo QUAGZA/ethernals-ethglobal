@@ -23,6 +23,7 @@ export function setTestEnv(name: string): void {
     SEPOLIA_RPC_URL: "https://sepolia.test",
     SEPOLIA_PRIVATE_KEY: `0x${"1".repeat(64)}`,
     ENS_PARENT_NAME: "ethernals-test.eth",
+    HIRE_LEDGER_ADDRESS: "",
     VERIFIER_TOKEN: "test-token",
     PUBLIC_BASE_URL: "https://app.test",
   });

@@ -86,6 +86,13 @@ export async function translate(text: string, target: string, agent: AgentRow | 
   }
 }
 
+/** Image and video agents answer with their 0G model's output. There is no offline version of this. */
+export async function generate(prompt: string, agent: AgentRow, purpose: string): Promise<string> {
+  if (!config.zeroG.enabled()) throw new Error("Image and video agents need 0G, which is off on this server.");
+  const { text } = await think(agent, { purpose, messages: [{ role: "user", content: prompt }] });
+  return text;
+}
+
 /** The buyer agent's judge: rates a result 1-5. The result is treated as quoted data. */
 export async function judge(task: string, result: string): Promise<{ rating: number; reason: string }> {
   try {

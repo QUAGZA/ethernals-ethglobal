@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useDeferredValue, useState } from "react";
 import type { TaskType } from "@ethernals/shared";
+import { TASK_TYPE_LABELS, TASK_TYPES } from "@ethernals/shared";
 import { useAgentDirectory } from "@/lib/use-agents";
 import { AgentList, displayName } from "./agent-card";
 
@@ -10,9 +11,7 @@ type Filter = "all" | TaskType;
 
 const filters: { value: Filter; label: string }[] = [
   { value: "all", label: "ALL AGENTS" },
-  { value: "summarize", label: "SUMMARIZE" },
-  { value: "translate", label: "TRANSLATE" },
-  { value: "code-fix", label: "CODE FIX" },
+  ...TASK_TYPES.map((value) => ({ value, label: TASK_TYPE_LABELS[value].toUpperCase() })),
 ];
 
 export function Market() {

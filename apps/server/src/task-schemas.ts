@@ -17,6 +17,9 @@ const relativePath = z
   .max(200)
   .refine((p) => !p.startsWith("/") && !p.includes("\\") && !p.split("/").some((part) => part === ".." || part === ".git"), "Test paths must stay inside the repo.");
 
+/** The same limit the verifier applies. */
+const MAX_PATCH_CHARS = 200_000;
+
 const specSchema = z.object({
   title: z.string().min(3).max(120),
   repoUrl: z.string().regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+?(\.git)?\/?$/, "Only public https://github.com repositories are allowed."),
@@ -25,11 +28,19 @@ const specSchema = z.object({
   testCommand: z.string().regex(/^pytest[\w\s./=:-]*$/, "The test command must be a pytest command.").optional(),
 });
 
+export const draftTestsSchema = specSchema.omit({ title: true });
+
+const checksSchema = z.object({
+  referencePatch: z.string().max(MAX_PATCH_CHARS, "The reference fix is too long.").optional(),
+  naivePatch: z.string().max(MAX_PATCH_CHARS, "The naive patch is too long.").optional(),
+});
+
 export const createTaskSchema = z
   .object({
     template: z.literal("slugify").optional(),
     spec: specSchema.optional(),
     hiddenTests: z.object({ files: z.array(z.object({ path: relativePath, content: z.string().min(1).max(40_000) })).min(1).max(10) }).optional(),
+    checks: checksSchema.optional(),
     bounty,
     deadlineMinutes: z.number().int().min(5, "The deadline must be at least 5 minutes.").max(1440, "The deadline can be at most 24 hours."),
     specialist: z.string().min(1).optional(),
