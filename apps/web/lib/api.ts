@@ -19,6 +19,7 @@ import type {
   HireView,
   InferenceReceipt,
   MeResponse,
+  ProofView,
   PublicConfig,
   RateResponse,
   RpContext,
@@ -29,6 +30,9 @@ import type {
   TaskView,
   TryOverspendResponse,
   VerifierHealth,
+  RunProofRequest,
+  SubcontractRequest,
+  SubcontractResponse,
   WorldVerifyRequest,
 } from "@ethernals/shared";
 
@@ -155,6 +159,10 @@ export const api = {
   connectNamera: (body: ConnectNameraRequest) => post<SpendPolicyView>("/api/me/spend/connect", body),
   disconnectNamera: () => request<{ ok: boolean }>("/api/me/spend", { method: "DELETE" }),
   tryOverspend: () => post<TryOverspendResponse>("/api/me/spend/try-overspend"),
+
+  proofs: () => get<ProofView[]>("/api/proofs"),
+  runProof: (body: RunProofRequest) => post<ProofView>("/api/proofs/demo", body),
+  subcontract: (body: SubcontractRequest) => post<SubcontractResponse>("/api/proofs/subcontract", body),
 
   arenaState: () => get<ArenaState>("/api/arena/state"),
   runOpenAttack: () => post<ArenaState>("/api/arena/open/run"),

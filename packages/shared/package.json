@@ -15,5 +15,8 @@
   "devDependencies": {
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "viem": "^2.57.0"
   }
 }

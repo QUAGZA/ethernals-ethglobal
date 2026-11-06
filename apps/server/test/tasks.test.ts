@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { keccak256, stringToHex } from "viem";
 import { canonicalJson, type TaskSpec } from "@ethernals/shared";
@@ -12,7 +15,7 @@ vi.mock("../src/verifier-client", async (original) => ({ ...(await original<obje
 
 const { getDb, getTask, listSpendEvents } = await import("../src/db");
 const { DirectGuard, MAX_DIRECT_SPENDS_PER_HOUR, recordSpend } = await import("../src/spend");
-const { SpendBlockedError, canRefund, createTask, refundEligibleAt, specHashOf, testsHashOf, tryOverspend, validationRequestHash, REFUND_GRACE_MS } = await import("../src/task-service");
+const { SpendBlockedError, canRefund, createTask, loadTemplate, refundEligibleAt, specHashOf, testsHashOf, tryOverspend, validationRequestHash, REFUND_GRACE_MS } = await import("../src/task-service");
 const { createDuelSchema, createTaskSchema } = await import("../src/task-schemas");
 const { agent, person } = await import("./_fixtures");
 const { isAllowedRepo } = await import("../src/coding-agent");
@@ -130,6 +133,24 @@ describe("the overspend demo", () => {
     expect(event.status).toBe("failed");
     expect(event.reason).toMatch(/Refused to send/);
     expect(execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("the slugify template", () => {
+  it("reads the issue from its file, and asks for the repo until task.json has one", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ethernals-template-"));
+    fs.mkdirSync(path.join(dir, "slugify/hidden_tests/tests_hidden"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "slugify/issue.md"), "Slugify breaks on accents.\n");
+    fs.writeFileSync(path.join(dir, "slugify/hidden_tests/tests_hidden/test_x.py"), "assert True");
+    const write = (fields: object) => fs.writeFileSync(path.join(dir, "slugify/task.json"), JSON.stringify({ title: "Fix", issueFile: "issue.md", testCommand: "pytest -q", ...fields }));
+
+    write({ repoUrl: "", baseCommit: "" });
+    await expect(loadTemplate("slugify", dir)).rejects.toThrow(/no repo yet/);
+
+    write({ repoUrl: "https://github.com/a/b", baseCommit: "a".repeat(40) });
+    const template = await loadTemplate("slugify", dir);
+    expect(template.spec.issue).toBe("Slugify breaks on accents.");
+    expect(template.hiddenTests.files.map((f) => f.path)).toEqual(["tests_hidden/test_x.py"]);
   });
 });
 

@@ -169,6 +169,13 @@ export const config = {
     apiUrl: () => str("NAMERA_API_URL") || undefined,
   },
 
+  /** Sandbox verifier (apps/verifier) and the Sepolia escrow it settles. */
+  proofs: {
+    verifierUrl: str("VERIFIER_URL", "http://127.0.0.1:4100").replace(/\/+$/, ""),
+    verifierToken: str("VERIFIER_TOKEN"),
+    escrow: (str("TASK_ESCROW_ADDRESS") || null) as `0x${string}` | null,
+  },
+
   arena: {
     fakeReviewers: int("ARENA_FAKE_REVIEWERS", 20),
     farmHires: int("ARENA_FARM_HIRES", 20),
