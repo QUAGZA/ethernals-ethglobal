@@ -217,6 +217,8 @@ export type EventType =
   | "inference.receipt" // a 0G Compute call finished (data.requestId, data.agentEnsName)
   | "spend.allowed" // Namera/guard confirmed a spend
   | "spend.blocked" // Namera/guard refused a spend (data.rule, data.reason)
+  | "sandbox.step" // a lead agent thought, recruited or was refused (data.runId; metadata only)
+  | "sandbox.done" // a run ended (data.runId, data.status)
   | "info";
 
 /** One message on GET /api/events (Server-Sent Events, `data:` is this JSON). */

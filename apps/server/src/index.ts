@@ -7,7 +7,7 @@ import { ZodError } from "zod";
 import { createApi } from "./api";
 import { handleSellerTask } from "./agent-runtime";
 import { config, ConfigError } from "./config";
-import { getDb } from "./db";
+import { failInterruptedSandboxRuns, getDb } from "./db";
 import { AppError } from "./errors";
 import { agentGate } from "./gate";
 import { log } from "./events";
@@ -45,6 +45,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 getDb();
+failInterruptedSandboxRuns();
 app.listen(config.serverPort, () => {
   log.info(`server listening on http://127.0.0.1:${config.serverPort} (public URL ${config.publicBaseUrl})`);
   log.info(`LLM: ${config.zeroG.enabled() ? `0G Router (${config.zeroG.network()})` : llmMode()} · World: ${config.world.env}/${config.world.humanMode} · payments: ${config.hedera.paymentAsset} on Hedera testnet`);

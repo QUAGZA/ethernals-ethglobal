@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { SpendGuardKind, TaskStatus } from "@ethernals/shared";
+import type { SandboxRefusal, SandboxRunStatus, SpendGuardKind, TaskStatus } from "@ethernals/shared";
 import { config } from "./config";
 
 export interface PersonRow {
@@ -140,6 +140,35 @@ export interface SpendEventRow {
   rule: string | null;
   reason: string | null;
   tx_hash: string | null;
+  created_at: string;
+}
+
+/** Metadata only: the goal is stored as a hash, and results are never stored. */
+export interface SandboxRunRow {
+  id: string;
+  lead_agent_key: string;
+  person_id: string;
+  goal_hash: string;
+  budget_units: string;
+  spent_units: string;
+  share_with_recruits: number;
+  brain: "0g-router" | "offline";
+  status: SandboxRunStatus;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface SandboxStepRow {
+  id: string;
+  run_id: string;
+  n: number;
+  kind: "thought" | "recruit" | "refused" | "finish";
+  agent_key: string | null;
+  amount_units: string | null;
+  refusal: SandboxRefusal | null;
+  request_id: string | null;
+  hire_id: string | null;
   created_at: string;
 }
 
@@ -340,6 +369,33 @@ function migrate(d: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS spend_person ON spend_events(person_id, created_at);
+    CREATE TABLE IF NOT EXISTS sandbox_runs (
+      id TEXT PRIMARY KEY,
+      lead_agent_key TEXT NOT NULL,
+      person_id TEXT NOT NULL,
+      goal_hash TEXT NOT NULL,
+      budget_units TEXT NOT NULL,
+      spent_units TEXT NOT NULL DEFAULT '0',
+      share_with_recruits INTEGER NOT NULL,
+      brain TEXT NOT NULL,
+      status TEXT NOT NULL,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS sandbox_steps (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      n INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      agent_key TEXT,
+      amount_units TEXT,
+      refusal TEXT,
+      request_id TEXT,
+      hire_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS sandbox_steps_run ON sandbox_steps(run_id, n);
   `);
   const agentColumns = d.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
   if (!agentColumns.some((c) => c.name === "strategy")) {
@@ -682,9 +738,54 @@ export function countConfirmedSpends(personId: string, guard: SpendGuardKind, si
   return Number(row.n);
 }
 
-/** Clears everything a demo run produces: tasks, duels, receipts and spend events. Keeps agents and brain keys. */
+// ---------- sandbox runs ----------
+export function insertSandboxRun(r: Omit<SandboxRunRow, "created_at" | "finished_at" | "spent_units" | "error" | "status">): SandboxRunRow {
+  getDb()
+    .prepare(
+      `INSERT INTO sandbox_runs (id, lead_agent_key, person_id, goal_hash, budget_units, share_with_recruits, brain, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
+    )
+    .run(r.id, r.lead_agent_key, r.person_id, r.goal_hash, r.budget_units, r.share_with_recruits, r.brain, now());
+  return getSandboxRun(r.id)!;
+}
+export function getSandboxRun(id: string): SandboxRunRow | undefined {
+  return getDb().prepare("SELECT * FROM sandbox_runs WHERE id = ?").get(id) as SandboxRunRow | undefined;
+}
+export function updateSandboxRun(id: string, fields: Partial<Pick<SandboxRunRow, "spent_units" | "status" | "error" | "finished_at">>): SandboxRunRow {
+  const entries = Object.entries(fields);
+  if (entries.length > 0) {
+    getDb()
+      .prepare(`UPDATE sandbox_runs SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE id = ?`)
+      .run(...entries.map(([, v]) => v as string | null), id);
+  }
+  return getSandboxRun(id)!;
+}
+export function listSandboxRuns(limit = 30): SandboxRunRow[] {
+  return getDb().prepare("SELECT * FROM sandbox_runs ORDER BY created_at DESC, rowid DESC LIMIT ?").all(limit) as unknown as SandboxRunRow[];
+}
+export function findRunningSandboxRun(leadAgentKey: string): SandboxRunRow | undefined {
+  return getDb().prepare("SELECT * FROM sandbox_runs WHERE lead_agent_key = ? AND status = 'running'").get(leadAgentKey) as SandboxRunRow | undefined;
+}
+/** Runs live in memory, so any still marked running when the server starts have ended. */
+export function failInterruptedSandboxRuns(): void {
+  getDb()
+    .prepare("UPDATE sandbox_runs SET status = 'failed', error = 'The server restarted during this run.', finished_at = ? WHERE status = 'running'")
+    .run(now());
+}
+export function insertSandboxStep(s: Omit<SandboxStepRow, "created_at">): SandboxStepRow {
+  const row: SandboxStepRow = { ...s, created_at: now() };
+  getDb()
+    .prepare("INSERT INTO sandbox_steps (id, run_id, n, kind, agent_key, amount_units, refusal, request_id, hire_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(s.id, s.run_id, s.n, s.kind, s.agent_key, s.amount_units, s.refusal, s.request_id, s.hire_id, row.created_at);
+  return row;
+}
+export function listSandboxSteps(runId: string): SandboxStepRow[] {
+  return getDb().prepare("SELECT * FROM sandbox_steps WHERE run_id = ? ORDER BY n").all(runId) as unknown as SandboxStepRow[];
+}
+
+/** Clears everything a demo run produces: tasks, duels, sandbox runs, receipts and spend events. Keeps agents and brain keys. */
 export function clearTaskData(): void {
-  getDb().exec("DELETE FROM tasks; DELETE FROM duels; DELETE FROM inference_receipts; DELETE FROM spend_events;");
+  getDb().exec("DELETE FROM tasks; DELETE FROM duels; DELETE FROM sandbox_steps; DELETE FROM sandbox_runs; DELETE FROM inference_receipts; DELETE FROM spend_events;");
 }
 
 /** Wipes hires, mandates and agents (keeps persons). Used by `pnpm demo:reset`. */
