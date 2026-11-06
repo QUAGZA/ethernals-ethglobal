@@ -2,6 +2,8 @@
  * Agents think on the 0G Compute Router: an OpenAI-compatible API. Each agent gets its own API key, every call leaves a
  * receipt, and earnings credit the agent's "brain". Prompts and completions are never stored; only ids, counts and costs.
  * The Router balance is the platform's treasury, so brain credit is internal accounting of earned versus spent.
+ * Prompts can hold repo code and hidden tests, so every call is pinned to 0G's sealed providers. 0G answers 503 when none
+ * is available and never falls back to a weaker tier.
  */
 import { formatUnits6, type AgentBrainView, type InferenceReceipt } from "@ethernals/shared";
 import { config } from "./config";
@@ -30,11 +32,14 @@ const MIN_MAX_TOKENS = 4000;
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 const MODELS_TIMEOUT_MS = 10_000;
 const PLATFORM_AGENT_KEY = "platform";
+const TRUST_MODE = "private";
+const TRUST_MODE_HEADER = "X-0G-Provider-Trust-Mode";
 
 export interface RouterModel {
   id: string;
   pricing?: { prompt?: string; completion?: string };
   supported_parameters?: string[];
+  verifiability?: string;
 }
 
 export interface ChatMessage {
@@ -99,16 +104,21 @@ const price = (value: string | undefined): bigint => {
 const supportsJson = (m: RouterModel) => m.supported_parameters?.includes("response_format") ?? false;
 const blendedPrice = (m: RouterModel) => price(m.pricing?.prompt) + price(m.pricing?.completion);
 
-/** ZG_MODEL if set, else 0G's own coding model, else the cheapest model that can answer in JSON. */
+/** A model with a provider that runs inside a TEE, so private mode can serve it. */
+export const isSealed = (m: RouterModel) => m.verifiability === "TeeML";
+
+/** ZG_MODEL if set (a model with no sealed provider then answers 503), else 0G's own coding model, else the cheapest sealed JSON model. */
 export function chooseModel(models: RouterModel[], preferred = config.zeroG.model()): RouterModel {
   const find = (id: string) => models.find((m) => m.id === id);
   if (preferred) return find(preferred) ?? { id: preferred };
+  const own = find(PREFERRED_MODEL);
   const picked =
-    find(PREFERRED_MODEL) ??
-    models
-      .filter((m) => supportsJson(m) && blendedPrice(m) > 0n)
-      .sort((a, b) => (blendedPrice(a) < blendedPrice(b) ? -1 : blendedPrice(a) > blendedPrice(b) ? 1 : 0))[0];
-  if (!picked) throw new RouterError(503, "The 0G Router lists no usable model.");
+    own && isSealed(own)
+      ? own
+      : models
+          .filter((m) => isSealed(m) && supportsJson(m) && blendedPrice(m) > 0n)
+          .sort((a, b) => (blendedPrice(a) < blendedPrice(b) ? -1 : blendedPrice(a) > blendedPrice(b) ? 1 : 0))[0];
+  if (!picked) throw new RouterError(503, "The 0G Router lists no sealed model that can answer in JSON.");
   return picked;
 }
 
@@ -119,8 +129,13 @@ export async function resolveModel(): Promise<RouterModel> {
 /** The model name without waiting on the Router, so a slow Router never holds up the web app. Refreshes in the background. */
 export function currentModelId(): string {
   void loadModels().catch(() => undefined);
-  const known = config.zeroG.model() ?? (modelCache ? chooseModel(modelCache.models).id : null);
-  return known ?? PREFERRED_MODEL;
+  const configured = config.zeroG.model();
+  if (configured || !modelCache) return configured ?? PREFERRED_MODEL;
+  try {
+    return chooseModel(modelCache.models).id;
+  } catch {
+    return PREFERRED_MODEL;
+  }
 }
 
 export function costOf(model: RouterModel, promptTokens: number, completionTokens: number): bigint {
@@ -196,7 +211,7 @@ async function postChat(apiKey: string, payload: unknown): Promise<Response> {
   const send = () =>
     safeFetch()(`${config.zeroG.routerBaseUrl()}/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}`, [TRUST_MODE_HEADER]: TRUST_MODE },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -335,14 +350,14 @@ function ensureBrain(agent: AgentRow, model: RouterModel): BrainRow {
   );
 }
 
-/** POST /v1/api-keys with the management key. The Router's docs do not fix the field name of the secret, so accept the likely ones. */
-export async function createAgentKey(label: string): Promise<string> {
+/** POST /v1/api-keys with the management key, as a private key. The Router's docs do not fix the field name of the secret, so accept the likely ones. */
+export async function createAgentKey(name: string): Promise<string> {
   const management = config.zeroG.managementKey();
   if (!management) throw new RouterError(503, "ZG_MANAGEMENT_KEY is not set.");
   const res = await safeFetch()(`${config.zeroG.routerBaseUrl()}/api-keys`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${management}` },
-    body: JSON.stringify({ label, name: label }),
+    body: JSON.stringify({ name, trust_mode: TRUST_MODE }),
   });
   if (!res.ok) throw new RouterError(res.status, `Key creation answered HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const body = (await res.json()) as Record<string, unknown> & { data?: Record<string, unknown> };

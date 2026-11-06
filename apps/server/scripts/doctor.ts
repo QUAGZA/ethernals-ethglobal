@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { formatEther, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { formatUnits6 } from "@ethernals/shared";
-import { resolveModel } from "../src/brain";
+import { isSealed, resolveModel } from "../src/brain";
 import { config, ENV_PATH, normalizeEcdsaKey, writeEnvValue } from "../src/config";
 import { generateSecret } from "../src/crypto";
 import { getSpendAccount, listAgents, listPersons } from "../src/db";
@@ -111,6 +111,7 @@ run(async () => {
       const model = await resolveModel();
       ok(`Router ${base} (${config.zeroG.network()}): model ${model.id}`);
       if (!model.pricing) warn(`No pricing listed for ${model.id}, so receipts will show zero cost`);
+      if (!isSealed(model)) warn(`${model.id} isn't listed as TeeML, so private calls to it will answer 503. Pick a TeeML model for ZG_MODEL`);
     } catch (err) {
       fail(`Router ${base} is unreachable: ${(err as Error).message}`, "Check the URL. If the testnet Router fails everywhere, tell the team: mainnet needs a real 0G deposit (PLAN.md §8)");
     }
@@ -125,7 +126,7 @@ run(async () => {
       if (balance?.ok) info(`Router balance: ${JSON.stringify(await balance.json()).slice(0, 120)}`);
       else info("Router balance: not readable with this key (it needs account:read)");
     }
-    config.zeroG.apiKeyOrNull() ? ok("Shared fallback key set") : fail("ZG_API_KEY is empty", "Create an API key at pc.testnet.0g.ai (SETUP.md, 0G Compute)");
+    config.zeroG.apiKeyOrNull() ? ok("Shared fallback key set") : fail("ZG_API_KEY is empty", "Create a Private API key in the 0G console (SETUP.md, 0G Compute)");
   }
 
   title("Verifier and escrow (Sepolia)");

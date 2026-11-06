@@ -5,7 +5,7 @@ await vi.hoisted(async () => {
   setTestEnv("brain");
 });
 
-const { brainView, chooseModel, clearModelCache, creditEarnings, costOf, createAgentKey, extractLastJson, isDormant, neuronForEarnings, setRetryDelayForTests, spinUpBrain, think } = await import("../src/brain");
+const { brainView, chooseModel, clearModelCache, creditEarnings, costOf, createAgentKey, currentModelId, extractLastJson, isDormant, loadModels, neuronForEarnings, setRetryDelayForTests, spinUpBrain, think } = await import("../src/brain");
 const { getBrain, listReceipts, upsertBrain } = await import("../src/db");
 const { agentGate } = await import("../src/gate");
 const { recentEvents } = await import("../src/events");
@@ -13,9 +13,10 @@ const { agent, person } = await import("./_fixtures");
 
 const MODELS = {
   data: [
-    { id: "cheap", pricing: { prompt: "1", completion: "1" }, supported_parameters: ["response_format"] },
-    { id: "pricey", pricing: { prompt: "9", completion: "9" }, supported_parameters: ["response_format"] },
-    { id: "0gm-1.0-35b-a3b", pricing: { prompt: "2", completion: "3" }, supported_parameters: ["response_format", "reasoning_effort"] },
+    { id: "cheap", pricing: { prompt: "1", completion: "1" }, supported_parameters: ["response_format"], verifiability: "TeeML" },
+    { id: "pricey", pricing: { prompt: "9", completion: "9" }, supported_parameters: ["response_format"], verifiability: "TeeML" },
+    { id: "0gm-1.0-35b-a3b", pricing: { prompt: "2", completion: "3" }, supported_parameters: ["response_format", "reasoning_effort"], verifiability: "TeeML" },
+    { id: "open", pricing: { prompt: "0", completion: "1" }, supported_parameters: ["response_format"], verifiability: "none" },
   ],
 };
 
@@ -37,6 +38,7 @@ function stubRouter(handler: Handler) {
 type Call = { url: string; init?: RequestInit };
 const chatCalls = (calls: Call[]) => calls.filter((c) => c.url.endsWith("/chat/completions"));
 const auth = (c: Call) => (c.init?.headers as Record<string, string>).authorization;
+const trustMode = (c: Call) => (c.init?.headers as Record<string, string>)["X-0G-Provider-Trust-Mode"];
 const messages = [{ role: "user" as const, content: "hi" }];
 
 beforeEach(() => {
@@ -46,10 +48,26 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("choosing a model", () => {
-  it("prefers ZG_MODEL, then 0G's own model, then the cheapest JSON model", () => {
-    expect(chooseModel(MODELS.data, "pricey").id).toBe("pricey");
+  const withoutOwnModel = MODELS.data.filter((m) => m.id !== "0gm-1.0-35b-a3b");
+
+  it("prefers ZG_MODEL, then 0G's own model, then the cheapest sealed JSON model", () => {
+    expect(chooseModel(MODELS.data, "open").id).toBe("open");
     expect(chooseModel(MODELS.data, null).id).toBe("0gm-1.0-35b-a3b");
-    expect(chooseModel(MODELS.data.slice(0, 2), null).id).toBe("cheap");
+    expect(chooseModel(withoutOwnModel, null).id).toBe("cheap");
+  });
+
+  it("skips 0G's own model when it has no sealed provider", () => {
+    const unsealed = MODELS.data.map((m) => (m.id === "0gm-1.0-35b-a3b" ? { ...m, verifiability: "none" } : m));
+    expect(chooseModel(unsealed, null).id).toBe("cheap");
+  });
+
+  it("refuses to pick when no model is sealed", async () => {
+    const open = MODELS.data.filter((m) => m.id === "open");
+    expect(() => chooseModel(open, null)).toThrow(/no sealed model/);
+
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ data: open })));
+    await loadModels();
+    expect(currentModelId()).toBe("0gm-1.0-35b-a3b");
   });
 
   it("prices a call from the model's per-token rates", () => {
@@ -133,7 +151,10 @@ describe("spinning up", () => {
     process.env.ZG_MANAGEMENT_KEY = "";
 
     expect(brain).toMatchObject({ key_label: seller.ens_name, credit_neuron: "920", last_request_id: "chatcmpl-birth" });
-    expect(auth(calls.find((c) => c.url.endsWith("/api-keys"))!)).toBe("Bearer mk-admin");
+    const keyCall = calls.find((c) => c.url.endsWith("/api-keys"))!;
+    expect(auth(keyCall)).toBe("Bearer mk-admin");
+    expect(JSON.parse(String(keyCall.init?.body))).toEqual({ name: seller.ens_name, trust_mode: "private" });
+    expect(trustMode(chatCalls(calls)[0])).toBe("private");
     expect(auth(chatCalls(calls)[0])).toBe("Bearer sk-agent");
     expect(listReceipts(seller.key)[0].purpose).toBe("birth");
     expect(recentEvents().filter((e) => e.type === "agent.born" && e.data.agentEnsName === seller.ens_name).map((e) => e.data.step)).toEqual(["brain-key", "first-thought"]);
@@ -145,6 +166,7 @@ describe("spinning up", () => {
     const brain = await spinUpBrain(seller);
     expect(brain?.api_key_enc).toBeNull();
     expect(auth(chatCalls(calls)[0])).toBe("Bearer sk-shared");
+    expect(trustMode(chatCalls(calls)[0])).toBe("private");
     expect(recentEvents().find((e) => e.data.agentEnsName === seller.ens_name && e.data.step === "brain-key")?.data.message).toMatch(/shared key/);
   });
 
