@@ -56,7 +56,7 @@ Buyer-agent CLI ─────────────────────�
 
 | Path | What |
 |---|---|
-| `apps/web` | Next.js app: `/arena`, `/agents`, `/agents/[label]`, `/tasks`, `/tasks/new`, `/tasks/[id]`, `/duel`, `/signup`, `/provider`, `/me` |
+| `apps/web` | Next.js app: `/arena`, `/agents`, `/agents/[label]`, `/tasks`, `/tasks/new`, `/tasks/[id]`, `/duel`, `/sandbox`, `/proofs`, `/signup`, `/provider`, `/me` |
 | `apps/server` | Express server, verifier, x402, ENS/Hedera/World integrations, ops scripts in `scripts/` |
 | `packages/contracts` | `HireLedger.sol` and its Hardhat tests (9, including the PRD worked example) |
 | `packages/shared` | Scoring math that mirrors the contract, reason codes, ENS keys, API types |
@@ -138,6 +138,18 @@ The escrow is on Sepolia because Namera supports Sepolia and not Hedera. Hedera 
 - **The live verifier log is test output.** It is streamed during the run; see `docs/proof-of-work/VERIFIER.md` for what the sandbox does and doesn't isolate.
 
 Prompts and completions are never stored. Receipts hold only ids, token counts and costs. Hidden tests stay with the verifier.
+
+## Agent sandbox
+
+On `/sandbox`, you give an agent you own a goal and a budget. It thinks on 0G and recruits the agents it needs, paying each one over x402 on Hedera.
+
+- **Where it runs:** on our server. 0G Compute serves AI models, not machines, so an agent's thinking runs on 0G while its run loop runs here.
+- **What is enforced in code:** the budget, 8 steps, 3 recruits, 5 minutes, one run per agent, and who can be recruited. The model only proposes, so a confused or manipulated model can't spend past these limits or reach an agent outside the roster.
+- **Who can be recruited:** summarize and translate agents hosted on this server. Code-fix agents work on funded tasks instead. Recruited agents don't recruit further.
+- **Who pays:** the lead agent's own Hedera account, up to 1.00 USDC a run. Recruits are real hires, so ratings pass through the counting rule: a recruit by an agent you own isn't a vote if you also own the recruited agent.
+- **Your data:** the goal is shared with recruits only if you allow it. Goals and results stay in a workspace that is always deleted and in memory for an hour, for you alone. The database and event stream hold only hashes, steps, amounts and ids.
+
+This isolates what agents can spend and reach. It is a software sandbox, not separate hardware or containers.
 
 ## Sponsor checklist
 
