@@ -16,10 +16,10 @@ export class EgressBlockedError extends Error {
   }
 }
 
-/** Hosts every hire may reach: the LLM API, the x402 facilitator, Hedera's mirror node and this server. */
+/** Hosts every hire may reach: the LLM APIs (Anthropic, 0G Router), the x402 facilitator, Hedera's mirror node and this server. */
 export function baseAllowedHosts(): string[] {
   const hosts = new Set<string>(["api.anthropic.com"]);
-  for (const url of [config.hedera.facilitatorUrl, config.hedera.mirrorUrl, config.internalBaseUrl]) {
+  for (const url of [config.hedera.facilitatorUrl, config.hedera.mirrorUrl, config.internalBaseUrl, config.zg.baseUrl]) {
     try {
       hosts.add(new URL(url).host);
     } catch {

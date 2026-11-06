@@ -25,6 +25,7 @@
     "deploy:escrow": "pnpm --filter @ethernals/verifier exec tsx scripts/deploy-escrow.ts",
     "verifier:setup": "pnpm --filter @ethernals/verifier exec tsx scripts/setup.ts",
     "verifier:image": "pnpm --filter @ethernals/verifier run image",
+    "zg:check": "pnpm --filter @ethernals/server exec tsx scripts/zg-check.ts",
     "verifier:dev": "pnpm --filter @ethernals/verifier dev"
   },
   "devDependencies": {

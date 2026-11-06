@@ -120,9 +120,9 @@ async function runTask(
   mandate: MandateRow,
 ): Promise<{ result: string; subHire: SubHireOutcome | null }> {
   if (seller.task_type === "translate") {
-    return { result: await translate(body.input, body.translateTo ?? "hi"), subHire: null };
+    return { result: await translate(body.input, body.translateTo ?? "hi", { agent: seller.ens_name }), subHire: null };
   }
-  const summary = await summarize(body.input);
+  const summary = await summarize(body.input, { agent: seller.ens_name });
   if (!body.translateTo) return { result: summary, subHire: null };
 
   // Deterministic sub-hire trigger (PRD SUB-2): "also translate" sends the summary to a translate agent.
