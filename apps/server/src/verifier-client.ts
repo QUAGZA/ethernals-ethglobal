@@ -1,6 +1,11 @@
 /** Client for the sandbox verifier's HTTP API (types in @ethernals/shared/tasks). */
 import type {
+  CalibrationAccepted,
+  CalibrationJob,
+  CalibrationReport,
+  CalibrationRequest,
   HiddenTestsBundle,
+  RevealedTests,
   UploadTestsResponse,
   VerifierEvent,
   VerifierHealth,
@@ -11,6 +16,10 @@ import type {
 import { config } from "./config";
 import { AppError } from "./errors";
 import { emit, log } from "./events";
+
+const CALIBRATION_POLL_MS = 1500;
+/** Three runs at the verifier's 120 s timeout, plus the clone and any queue. */
+const CALIBRATION_TIMEOUT_MS = 10 * 60 * 1000;
 
 const base = () => config.verifierService.url();
 const authHeaders = () => ({ "content-type": "application/json", "x-verifier-token": config.verifierService.token() });
@@ -30,9 +39,24 @@ async function call<T>(path: string, init: RequestInit): Promise<T> {
 
 export const verifierHealth = () => call<VerifierHealth>("/health", {});
 
-/** The hidden tests go to the verifier and nowhere else. Only the id and hash come back. */
+/** The hidden tests go to the verifier. Only the id and hash come back, until the tests are revealed after settlement. */
 export const uploadHiddenTests = (bundle: HiddenTestsBundle) =>
   call<UploadTestsResponse>("/tests", { method: "POST", headers: authHeaders(), body: JSON.stringify(bundle) });
+
+/** Waits for the verifier's check of these tests, which runs them against the unfixed code and any supplied patches. */
+export async function calibrateTests(request: CalibrationRequest): Promise<CalibrationReport> {
+  const { calibrationId } = await call<CalibrationAccepted>("/calibrations", { method: "POST", headers: authHeaders(), body: JSON.stringify(request) });
+  const giveUpAt = Date.now() + CALIBRATION_TIMEOUT_MS;
+  while (Date.now() < giveUpAt) {
+    const job = await call<CalibrationJob>(`/calibrations/${encodeURIComponent(calibrationId)}`, { headers: authHeaders() });
+    if (job.status === "done" && job.report) return job.report;
+    if (job.status === "error") throw new AppError(502, "The verifier could not check these tests.", job.error ?? undefined);
+    await new Promise((resolve) => setTimeout(resolve, CALIBRATION_POLL_MS));
+  }
+  throw new AppError(504, "The verifier took too long to check these tests.", "Nothing was funded. Try again.");
+}
+
+export const getRevealedTests = (jobId: string) => call<RevealedTests>(`/jobs/${encodeURIComponent(jobId)}/tests`, { headers: authHeaders() });
 
 export const startVerify = (request: VerifyRequest) =>
   call<VerifyAccepted>("/verify", { method: "POST", headers: authHeaders(), body: JSON.stringify(request) });

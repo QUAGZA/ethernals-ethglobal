@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { HiddenTestsBundle, ValidationReceipt, VerificationResult, VerifyJob, VerifierEvent, Hex } from "@ethernals/shared";
+import type { CalibrationJob, HiddenTestsBundle, ValidationReceipt, VerificationResult, VerifyJob, VerifierEvent, Hex } from "@ethernals/shared";
 
 export interface StoredReceipt {
   receipt: ValidationReceipt;
@@ -9,10 +9,10 @@ export interface StoredReceipt {
 
 const safeId = (id: string) => /^[A-Za-z0-9_-]{1,64}$/.test(id);
 
-/** File-backed storage under VERIFIER_DATA_DIR: tests/, jobs/, results/, receipts/. */
+/** File-backed storage under VERIFIER_DATA_DIR: tests/, jobs/, results/, receipts/, calibrations/. */
 export class Store {
   constructor(private readonly dir: string) {
-    for (const d of ["tests", "jobs", "results", "receipts", "events"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+    for (const d of ["tests", "jobs", "results", "receipts", "events", "calibrations"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
   }
   private file(kind: string, id: string, ext = "json") {
     if (!safeId(id)) throw new Error("bad id");
@@ -38,6 +38,9 @@ export class Store {
 
   putReceipt(jobId: string, r: StoredReceipt) { this.write("receipts", jobId, r); }
   getReceipt(jobId: string) { return this.read<StoredReceipt>("receipts", jobId); }
+
+  putCalibration(c: CalibrationJob) { this.write("calibrations", c.calibrationId, c); }
+  getCalibration(id: string) { return this.read<CalibrationJob>("calibrations", id); }
 
   appendEvent(jobId: string, e: VerifierEvent) {
     if (safeId(jobId)) fs.appendFileSync(this.file("events", jobId, "ndjson"), JSON.stringify(e) + "\n");

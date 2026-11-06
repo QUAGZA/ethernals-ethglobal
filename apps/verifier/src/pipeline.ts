@@ -8,6 +8,7 @@ import {
   receiptFromResult,
   hashReceipt,
   type Hex,
+  type HiddenTestsBundle,
   type VerificationResult,
   type VerifyJob,
   type VerifyRequest,
@@ -15,7 +16,8 @@ import {
 } from "@ethernals/shared";
 import type { ChainClient } from "./chain";
 import { isSafeRelativePath, keccakUtf8 } from "./hashing";
-import { grade, parseJunit, type Grade } from "./junit";
+import { addCanary, gradeRun, makeCanary } from "./canary";
+import type { Grade } from "./junit";
 import { runTests, type RunOutcome } from "./runner";
 import type { Store } from "./store";
 
@@ -30,10 +32,12 @@ export interface PipelineDeps {
   publicUrl: string;
   emit: (e: VerifierEvent) => void;
   /** Override for tests: puts the repo at base commit into `repoDir`. */
-  prepareRepo?: (repoDir: string, req: VerifyRequest, log: (l: string) => void) => Promise<void>;
+  prepareRepo?: (repoDir: string, req: RepoRef, log: (l: string) => void) => Promise<void>;
   /** Override for tests. */
   run?: typeof runTests;
 }
+
+export type RepoRef = Pick<VerifyRequest, "repoUrl" | "baseCommit">;
 
 export const GITHUB_REPO = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\.git)?$/;
 const SHA = /^[0-9a-f]{40}$/;
@@ -50,7 +54,7 @@ function git(cwd: string, args: string[], input?: string): Promise<{ code: numbe
   });
 }
 
-export async function cloneRepo(repoDir: string, req: VerifyRequest, log: (l: string) => void): Promise<void> {
+export async function cloneRepo(repoDir: string, req: RepoRef, log: (l: string) => void): Promise<void> {
   if (!GITHUB_REPO.test(req.repoUrl)) throw new Error("only https://github.com/ repositories are accepted");
   if (!SHA.test(req.baseCommit)) throw new Error("baseCommit must be a full 40-character SHA");
   const parent = path.dirname(repoDir);
@@ -61,16 +65,56 @@ export async function cloneRepo(repoDir: string, req: VerifyRequest, log: (l: st
   log(`checked out ${req.baseCommit.slice(0, 8)}`);
 }
 
-async function applyPatch(repoDir: string, patch: string, log: (l: string) => void): Promise<boolean> {
+export type PatchOutcome = "applied" | "did_not_apply" | "changes_test_setup";
+
+/** Files pytest reads to decide how it runs. A patch that changes one can make failing tests report as passed. */
+const TEST_SETUP_FILES = new Set(["conftest.py", "pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", "pyproject.toml", "setup.cfg", "tox.ini"]);
+
+/** Added code that reaches into pytest itself. `import pytest` and `pytest.mark` are fine. */
+const PYTEST_INTERNALS = /\b_pytest\b|\bTestReport\b|\bhookimpl\b|\bhookwrapper\b|\bpytest_\w+/;
+
+/**
+ * Why a patch may not be graded, or null. `numstatZ` is `git apply --numstat -z`: git's own reading of the paths, so a
+ * quoted or renamed path can't slip past. Patched code runs inside pytest, so this stops the plain routes, not all of them.
+ */
+export function testSetupChange(numstatZ: string, patch: string): string | null {
+  for (const record of numstatZ.split("\0").filter(Boolean)) {
+    const [added, , ...name] = record.split("\t");
+    const file = name.join("\t");
+    if (added === "-") return `binary change to ${file}`;
+    if (TEST_SETUP_FILES.has(path.posix.basename(file).toLowerCase())) return `change to ${file}`;
+  }
+  const hook = patch.split("\n").find((line) => line.startsWith("+") && !line.startsWith("+++") && PYTEST_INTERNALS.test(line));
+  return hook ? "added code that reaches into pytest" : null;
+}
+
+export async function applyPatch(repoDir: string, patch: string, log: (l: string) => void): Promise<PatchOutcome> {
   const f = path.join(path.dirname(repoDir), "submitted.patch");
   fs.writeFileSync(f, patch);
   const check = await git(repoDir, ["apply", "--check", f]);
   if (check.code !== 0) {
     log(`patch does not apply: ${check.out.split("\n")[0]}`);
-    return false;
+    return "did_not_apply";
+  }
+  const listed = await git(repoDir, ["apply", "--numstat", "-z", f]);
+  const refused = listed.code === 0 ? testSetupChange(listed.out, patch) : "a patch git could not list";
+  if (refused) {
+    log(`patch refused: ${refused}`);
+    return "changes_test_setup";
   }
   const ap = await git(repoDir, ["apply", f]);
-  return ap.code === 0;
+  return ap.code === 0 ? "applied" : "did_not_apply";
+}
+
+/** Writes the hidden tests over the repo. They go in after any patch, so a patch cannot replace them. */
+export function addTests(repoDir: string, bundle: HiddenTestsBundle): boolean {
+  if (!bundle.files.every((f) => isSafeRelativePath(f.path))) return false;
+  for (const f of bundle.files) {
+    const dest = path.join(repoDir, ...f.path.split("/"));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, f.content);
+  }
+  return true;
 }
 
 function nowIso() {
@@ -133,16 +177,15 @@ export async function runJob(deps: PipelineDeps, jobId: string, req: VerifyReque
 
     let g: Grade;
     let outcome: RunOutcome = { exitCode: null, timedOut: false, junitXml: null };
-    const applied = await applyPatch(repoDir, req.patch, log);
-    if (!applied) {
-      g = { passed: false, testsPassed: 0, testsFailed: 0, testsErrored: 0, failureReason: "patch_did_not_apply" };
+    const patched = await applyPatch(repoDir, req.patch, log);
+    if (patched !== "applied") {
+      const failureReason = patched === "did_not_apply" ? "patch_did_not_apply" : "patch_changes_test_setup";
+      g = { passed: false, testsPassed: 0, testsFailed: 0, testsErrored: 0, failureReason };
     } else {
-      for (const f of bundle.files) {
-        if (!isSafeRelativePath(f.path)) return fail("unsafe path in hidden tests");
-        const dest = path.join(repoDir, ...f.path.split("/"));
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.writeFileSync(dest, f.content);
-      }
+      if (!addTests(repoDir, bundle)) return fail("unsafe path in hidden tests");
+      const canary = makeCanary(bundle);
+      addCanary(repoDir, canary);
+      log("added a control test that must fail, so one failure below is expected");
       log(`running hidden tests (${deps.mode}${deps.mode === "local" ? ", NOT isolated" : ""})`);
       outcome = await (deps.run ?? runTests)({
         mode: deps.mode,
@@ -154,7 +197,9 @@ export async function runJob(deps: PipelineDeps, jobId: string, req: VerifyReque
         timeoutSeconds: deps.timeoutSeconds,
         onLine: log,
       });
-      g = grade(outcome.exitCode, outcome.timedOut, outcome.junitXml ? parseJunit(outcome.junitXml) : null);
+      const graded = gradeRun(outcome, canary);
+      g = graded.grade;
+      log(graded.canary === "failed" ? "the control test failed as expected" : `the control test ${graded.canary === "passed" ? "did not fail" : "did not run"}`);
     }
 
     const finishedAt = nowIso();

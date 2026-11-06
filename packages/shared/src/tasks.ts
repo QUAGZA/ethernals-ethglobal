@@ -133,10 +133,55 @@ export interface VerifierHealth {
   paidVerify: { feeUsdc: string; payTo: string; network: "hedera:testnet" } | null;
 }
 
-/** POST /tests  body: HiddenTestsBundle  →  UploadTestsResponse. The verifier never returns the contents. */
+/** POST /tests  body: HiddenTestsBundle  →  UploadTestsResponse. Contents come back only through GET /jobs/:jobId/tests. */
 export interface UploadTestsResponse {
   testsId: string;
   testsHash: Hex;
+}
+
+/** GET /jobs/:jobId/tests  →  409 until that job's settlement is on-chain. Anyone can re-hash `files` against testsHash. */
+export interface RevealedTests {
+  testsId: string;
+  testsHash: Hex;
+  files: HiddenTestsBundle["files"];
+}
+
+/** POST /calibrations  →  202 CalibrationAccepted. Checks tests before any money moves. The patches are never stored. */
+export interface CalibrationRequest {
+  repoUrl: string;
+  baseCommit: string;
+  testsId: string;
+  testsHash: Hex;
+  testCommand?: string;
+  /** A correct fix: the tests must pass with it. */
+  referencePatch?: string;
+  /** A shallow fix: the tests should reject it. */
+  naivePatch?: string;
+}
+
+export interface CalibrationAccepted {
+  calibrationId: string;
+}
+
+/** Counts and verdicts only, so it is safe to show before settlement: no test names, source or output. */
+export interface CalibrationReport {
+  /** True when nothing below rules the tests out. It never proves the tests are good. */
+  ok: boolean;
+  /** The unfixed code. `realFailures` counts only the hidden tests, and only failed checks, not import or syntax errors. */
+  base: { realFailures: number; testsPassed: number; testsFailed: number; testsErrored: number };
+  reference: "passed" | "failed" | "not_provided";
+  naive: "rejected" | "accepted" | "inconclusive" | "not_provided";
+  /** Plain-language reasons the tests were ruled out. Empty when `ok`. */
+  reasons: string[];
+  isolation: "docker" | "none";
+}
+
+/** GET /calibrations/:id */
+export interface CalibrationJob {
+  calibrationId: string;
+  status: "queued" | "running" | "done" | "error";
+  report: CalibrationReport | null;
+  error: string | null;
 }
 
 /** POST /verify  →  202 VerifyAccepted */
@@ -179,7 +224,7 @@ export interface VerificationResult {
   testsPassed: number;
   testsFailed: number;
   testsErrored: number;
-  /** "patch_did_not_apply" | "timeout" | "tests_failed" | null (null when passed). */
+  /** "patch_did_not_apply" | "patch_changes_test_setup" | "results_tampered" | "timeout" | "tests_failed" | "no_tests_ran" | null (null when passed). */
   failureReason: string | null;
   durationMs: number;
   /** keccak256 of the full raw log text. */
@@ -231,7 +276,7 @@ export type VerifierEvent =
 
 export interface InferenceReceipt {
   agentEnsName: string;
-  /** "code-fix" | "summarize" | "translate" | "judge" | "birth" */
+  /** "code-fix" | "summarize" | "translate" | "judge" | "birth" | "draft-tests" */
   purpose: string;
   taskId: string | null;
   model: string;
@@ -381,6 +426,10 @@ export interface TaskView {
   spec: TaskSpec;
   specHash: Hex | null;
   testsHash: Hex | null;
+  /** What the verifier found before funding. Null for built-in templates and for tasks older than this check. */
+  calibration: CalibrationReport | null;
+  /** Where the tests are published. Null while they are hidden. */
+  testsUrl: string | null;
   bounty: string;
   deadline: string; // ISO
   status: TaskStatus;
@@ -408,10 +457,37 @@ export interface CreateTaskRequest {
   template?: "slugify";
   spec?: Omit<TaskSpec, "version" | "kind" | "language">;
   hiddenTests?: HiddenTestsBundle;
+  /** Patches the verifier checks custom tests against. Used for the check, never stored. */
+  checks?: TestChecks;
   bounty: string; // e.g. "2.00"
   deadlineMinutes: number; // e.g. 30
   /** ENS name of the only specialist allowed to accept, or omit for an open task. */
   specialist?: string;
+}
+
+export interface TestChecks {
+  referencePatch?: string;
+  naivePatch?: string;
+}
+
+/** Where a drafted test file goes. The task form posts one file, so a draft is one file too. */
+export const DRAFT_TEST_PATH = "tests_hidden/test_x.py";
+
+/** POST /api/tasks/draft-tests — the client's buyer agent proposes tests. Nothing is funded and the client reviews them first. */
+export type DraftTestsRequest = Pick<TaskSpec, "repoUrl" | "baseCommit" | "issue" | "testCommand">;
+
+export interface DraftTestsResponse {
+  tests: string;
+  referencePatch: string;
+  naivePatch: string | null;
+  calibration: CalibrationReport;
+}
+
+/** GET /api/tasks/:id/tests.json — re-hash `files` to check them against the on-chain testsHash. */
+export interface PublishedTests {
+  testsHash: Hex;
+  files: HiddenTestsBundle["files"];
+  calibration: CalibrationReport | null;
 }
 
 /** POST /api/tasks/:id/hire — the client's buyer agent pays the specialist's x402 endpoint to work on the task. */

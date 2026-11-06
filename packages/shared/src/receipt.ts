@@ -71,7 +71,11 @@ export interface ReceiptContext {
 export function receiptFromResult(result: VerificationResult, resultHash: Hex, ctx: ReceiptContext): ValidationReceipt {
   const total = result.testsPassed + result.testsFailed + result.testsErrored;
   const executionStatus: ValidationReceipt["execution_status"] =
-    result.failureReason === "timeout" ? "timeout" : result.failureReason === "patch_did_not_apply" ? "failed" : "completed";
+    result.failureReason === "timeout"
+      ? "timeout"
+      : ["patch_did_not_apply", "patch_changes_test_setup", "results_tampered"].includes(result.failureReason ?? "")
+        ? "failed"
+        : "completed";
   return {
     task_id: result.taskId,
     chain_task_id: result.chainTaskId,

@@ -19,6 +19,8 @@ import { startUnratedSweeper } from "./verifier";
 const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", true);
+// Custom tasks carry tests and patches. express.json leaves a body it has already parsed alone.
+app.use("/api/tasks", express.json({ limit: "1mb" }));
 app.use(express.json({ limit: "64kb" }));
 
 app.use("/a/:label/task", agentGate);

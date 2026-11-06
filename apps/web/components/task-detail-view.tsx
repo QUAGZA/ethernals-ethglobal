@@ -12,7 +12,7 @@ import { EmptyNote, ErrorNotice } from "./error-notice";
 import { ExtLink } from "./ext-link";
 import { PageHeading, Panel, Stat } from "./page-heading";
 import { ReasonBadge } from "./reason-badge";
-import { PRIMARY_BUTTON, PatchDiff, ReceiptTable, SECONDARY_BUTTON, SpendEvents, StatusChip, VerifierConsole, isFinished, useVerifyLog } from "./task-bits";
+import { CalibrationSummary, PRIMARY_BUTTON, PatchDiff, ReceiptTable, SECONDARY_BUTTON, SpendEvents, StatusChip, VerifierConsole, isFinished, useVerifyLog } from "./task-bits";
 import { SpecialistPicker, useSpecialists } from "./task-new-view";
 import { useToast } from "./toast-provider";
 
@@ -72,6 +72,34 @@ function ResultCard({ task }: { task: TaskDetail }) {
         <ExtLink href={links.hireLedger}>HireLedger</ExtLink>
         <ExtLink href={links.x402Payment}>x402 payment</ExtLink>
       </div>
+    </Panel>
+  );
+}
+
+/** Published tests: the exact files behind the outcome, which anyone can re-hash against testsHash. */
+function PublishedFiles({ task }: { task: TaskDetail }) {
+  const loader = useCallback(() => api.taskTests(task.id), [task.id]);
+  const tests = useLoad(loader, `task-tests:${task.id}`);
+  if (tests.error) return <ErrorNotice className="mt-3" error={tests.error} title="Could not load the tests" onRetry={() => void tests.reload()} />;
+  return (
+    <div className="mt-4 flex flex-col gap-3">
+      {tests.data?.files.map((file) => (
+        <div key={file.path}>
+          <p className="eyebrow m-0 mb-1 opacity-60">{file.path}</p>
+          <pre className="m-0 max-h-[420px] overflow-auto bg-ink p-4 text-[12px] leading-[1.6] text-paper">{file.content}</pre>
+        </div>
+      ))}
+      {tests.data && <p className="m-0 text-[11px] leading-[1.5] opacity-70">Hash these files to check them against the on-chain testsHash.</p>}
+    </div>
+  );
+}
+
+function TestsPanel({ task }: { task: TaskDetail }) {
+  if (!task.calibration) return null;
+  return (
+    <Panel title="The tests" right={task.testsUrl ? <ExtLink href={task.testsUrl}>Published</ExtLink> : "hidden until settlement"}>
+      <CalibrationSummary report={task.calibration} />
+      {task.testsUrl && <PublishedFiles task={task} />}
     </Panel>
   );
 }
@@ -183,6 +211,7 @@ export function TaskDetailView({ id }: { id: string }) {
         {data.error && <ErrorNotice error={{ message: data.error }} title="This task hit a problem" />}
         <Actions task={data} reload={() => void task.reload()} />
         <ResultCard task={data} />
+        <TestsPanel task={data} />
         <div className="grid grid-cols-2 gap-[18px] max-md:grid-cols-1">
           <Panel title="Verifier console" bodyClassName="">
             <VerifierConsole lines={log.lines} status={log.status} finished={isFinished(data.status)} />

