@@ -17,9 +17,13 @@ import { createSellerAgent, ensureBuyerAgent } from "./agents";
 import { getArenaState, runEthernalsAttack, runOpenAttack } from "./arena";
 import { agentReceipts, brainSettingsView, brainView, currentModelId, updateBrainSettings } from "./brain";
 import { assertPublicUrl, listMcpTools } from "./agent-tools";
+import { adoptAgentsFor } from "./adopt";
+import { chainTasks } from "./chain-tasks";
+import { ensureHandleClaim, publishHandleClaim, readHandleClaim } from "./people";
+import { publishEndpoint, queueConfigPublish } from "./ens";
 import { hireAsAgent } from "./buyer";
 import { config } from "./config";
-import { createSessionToken, encryptSecret, randomId, readSessionToken } from "./crypto";
+import { createSessionToken, encryptSecret, nullifierHash, randomId, readSessionToken } from "./crypto";
 import {
   countHires,
   deleteAgentTool,
@@ -242,18 +246,30 @@ export function createApi(): Router {
     if (existing) {
       setSession(res, existing.id);
       startBuyerCreation(existing);
+      void ensureHandleClaim(existing, nullifier);
+      void adoptAgentsFor(existing);
       res.json({ ...(await meResponse(existing)), notice: `This World ID is already registered as "${existing.handle}". You are signed in.` });
       return;
     }
     if (!HANDLE_REGEX.test(handle)) throw badRequest("Handles use 1-24 lowercase letters, digits or hyphens.");
+    // The handle is also claimed on-chain (ENS), so it is unique across servers and the same human keeps one identity.
+    let claim: Awaited<ReturnType<typeof readHandleClaim>> = null;
+    try {
+      claim = await readHandleClaim(handle);
+    } catch (err) {
+      log.warn("could not read the on-chain handle claim; continuing with local checks", { error: (err as Error).message });
+    }
+    if (claim && claim.nullhash !== nullifierHash(nullifier)) throw conflict(`The handle "${handle}" is already claimed by someone else.`);
     if (findPersonByHandle(handle) || getAgentByLabel(`${handle}-buyer`)) throw conflict(`The handle "${handle}" is taken.`);
     const person = insertPerson({
-      id: randomId("person"),
+      id: claim?.personId && !getPerson(claim.personId) ? claim.personId : randomId("person"),
       world_nullifier: nullifier,
       handle,
       mode: config.world.humanMode,
       credential_expires_at: null,
     });
+    if (!claim) publishHandleClaim(person, nullifier);
+    else void adoptAgentsFor(person);
     setSession(res, person.id);
     startBuyerCreation(person);
     res.json(await meResponse(person));
@@ -397,6 +413,7 @@ export function createApi(): Router {
   r.put("/api/agents/:label/config", (req, res) => {
     const agent = ownedAgent(req);
     updateBrainSettings(agent, updateConfigSchema.parse(req.body));
+    queueConfigPublish(agent);
     res.json(brainSettingsView(agent));
   });
   r.post("/api/agents/:label/tools", async (req, res) => {
@@ -432,12 +449,23 @@ export function createApi(): Router {
       }
     }
     insertAgentTool(row);
+    queueConfigPublish(agent);
     res.json(brainSettingsView(agent));
   });
   r.delete("/api/agents/:label/tools/:id", (req, res) => {
     const agent = ownedAgent(req);
     if (!deleteAgentTool(String(req.params.id), agent.key)) throw notFound("No such tool.");
+    queueConfigPublish(agent);
     res.json(brainSettingsView(agent));
+  });
+  // Make this server the agent's host: write its public URL into the agent's ENS endpoint record.
+  r.post("/api/agents/:label/host-here", async (req, res) => {
+    const agent = ownedAgent(req);
+    if (/localhost|127\.0\.0\.1/.test(config.publicBaseUrl)) {
+      throw badRequest("This server's PUBLIC_BASE_URL is local.", "Run pnpm dev:public so the server has a public tunnel URL first.");
+    }
+    await publishEndpoint(agent);
+    res.json({ ok: true, endpoint: `${config.publicBaseUrl}/a/${agent.label}/task` });
   });
 
   r.post("/api/agents", async (req, res) => {
@@ -498,6 +526,12 @@ export function createApi(): Router {
   // ------------------------------------------------------------------ proof-of-work tasks
   r.get("/api/tasks", (_req, res) => {
     res.json(listTasks().map(taskView));
+  });
+
+  // Escrow tasks found on Sepolia that this server's database does not know (read-only, chain is the source of truth).
+  r.get("/api/tasks/chain", async (_req, res) => {
+    const known = new Set(listTasks(10_000).map((t) => t.chain_task_id).filter(Boolean));
+    res.json((await chainTasks()).filter((t) => !known.has(t.chainTaskId)));
   });
 
   // The public part only: hidden tests stay with the verifier.

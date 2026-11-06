@@ -6,7 +6,7 @@ import { namehash } from "viem/ens";
 import { assertValidLabel, formatUnits6, parseUnits6, type CreateAgentRequest } from "@ethernals/shared";
 import { config } from "./config";
 import { spinUpBrain } from "./brain";
-import { encryptSecret, personHash, providerKey } from "./crypto";
+import { deriveAgentKeyHex, encryptSecret, personHash, providerKey } from "./crypto";
 import { getAgentByLabel, getAgentByEnsName, insertAgent, listAgentsOfPerson, updateAgent, type AgentRow, type PersonRow } from "./db";
 import { agentEnsName, publishAgent } from "./ens";
 import { badRequest, conflict } from "./errors";
@@ -64,7 +64,7 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
   const step = opts.onStep ?? (() => {});
 
   step(`Creating a Hedera account for ${ensName}...`);
-  const account = await createAgentAccount(opts.kind === "seller" ? 2 : 1);
+  const account = await createAgentAccount(opts.kind === "seller" ? 2 : 1, deriveAgentKeyHex(ensName));
 
   let agent = insertAgent({
     key,

@@ -25,6 +25,7 @@ import {
 } from "@ethernals/shared";
 import { providerKeyShort } from "./agents";
 import { taskReceipts } from "./brain";
+import { chainHiresFor } from "./chain-history";
 import { config } from "./config";
 import {
   countSpecialistTasks,
@@ -165,7 +166,7 @@ export async function remoteAgentView(row: ChainAgentRow): Promise<AgentSummary>
 export async function remoteAgentDetail(row: ChainAgentRow): Promise<AgentDetail> {
   return {
     ...(await remoteAgentView(row)),
-    hires: [],
+    hires: (await chainHiresFor(row.key)).map((h) => ({ ...h, agentEnsName: row.name })),
     ensAppUrl: ensAppUrl(row.name),
     hederaAccountUrl: row.hedera_account ? hashscanAccountUrl(row.hedera_account) : "",
     siblingAgents: [],

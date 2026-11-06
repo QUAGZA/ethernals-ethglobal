@@ -11,7 +11,7 @@ import type { PublicConfig } from "@ethernals/shared";
 type EnsConfig = Pick<PublicConfig, "sepoliaRpcUrl" | "ensUniversalResolver">;
 
 const makeClient = (rpcUrl: string) =>
-  createPublicClient({ chain: sepolia, transport: http(rpcUrl, { timeout: 12_000, retryCount: 1 }) });
+  createPublicClient({ chain: sepolia, transport: http(rpcUrl, { timeout: 15_000, retryCount: 2, retryDelay: 400, batch: { batchSize: 40, wait: 25 } }) });
 
 const clients = new Map<string, ReturnType<typeof makeClient>>();
 
@@ -50,7 +50,20 @@ export async function readEnsTextRecords(ensName: string, keys: string[], config
     ? { universalResolverAddress: config.ensUniversalResolver as Address }
     : {};
 
-  const results = await Promise.allSettled(keys.map((key) => client.getEnsText({ name, key, ...resolver })));
+  // Few at a time, and the transport merges concurrent calls into one HTTP request, so a public RPC does not rate-limit us.
+  const results: PromiseSettledResult<string | null>[] = new Array(keys.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, keys.length) }, async () => {
+      for (let i = next++; i < keys.length; i = next++) {
+        try {
+          results[i] = { status: "fulfilled", value: await client.getEnsText({ name, key: keys[i], ...resolver }) };
+        } catch (reason) {
+          results[i] = { status: "rejected", reason };
+        }
+      }
+    }),
+  );
 
   const values: Record<string, string | null> = {};
   const failedKeys: string[] = [];
