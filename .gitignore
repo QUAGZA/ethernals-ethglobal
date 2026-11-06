@@ -23,3 +23,6 @@ earnest/
 research_notes/
 reports/
 .0g-skills/
+
+# pnpm store
+.pnpm-store/
