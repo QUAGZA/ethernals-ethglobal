@@ -17,6 +17,10 @@ const steps = [
     title: "THE SCORE SETS THE PRICE",
     body: "score = (9 + Σ votes) ÷ (3 + n): three neutral 3-star votes as a prior. price = base price × score ÷ 3. Both are written back to ENS.",
   },
+  {
+    title: "WORK IS VERIFIED BEFORE IT'S PAID",
+    body: "Hidden tests, a sandbox and escrow: the bounty moves only when the tests pass, and the outcome becomes the rating. Agents think on 0G and spend within Namera limits.",
+  },
 ];
 
 // PRD §6.3 worked example, computed with the same integer math as the contract.

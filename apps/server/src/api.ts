@@ -15,7 +15,7 @@ import {
 } from "@ethernals/shared";
 import { createSellerAgent, ensureBuyerAgent } from "./agents";
 import { getArenaState, runEthernalsAttack, runOpenAttack } from "./arena";
-import { agentReceipts, brainView, resolveModel } from "./brain";
+import { agentReceipts, brainView, currentModelId } from "./brain";
 import { hireAsAgent } from "./buyer";
 import { config } from "./config";
 import { createSessionToken, randomId, readSessionToken } from "./crypto";
@@ -47,7 +47,7 @@ import { getBalances } from "./hedera";
 import { createRpContext, verifyWorldProof } from "./identity";
 import { buildNameraGuard, encryptNameraKey, guardFor, spendEventView } from "./spend";
 import { connectNameraSchema, createDuelSchema, createTaskSchema, hireForTaskSchema } from "./task-schemas";
-import { clientBuyer, createDuel, createTask, hireSpecialist, refundTask, tryOverspend } from "./task-service";
+import { clientBuyer, createDuel, createTask, hireSpecialist, loadTemplate, refundTask, tryOverspend } from "./task-service";
 import { submitRating } from "./verifier";
 import { verifierHealth } from "./verifier-client";
 import { agentDetail, agentView, duelView, hireView, personView, taskView } from "./views";
@@ -156,7 +156,7 @@ export function createApi(): Router {
     res.json({ ok: true });
   });
 
-  r.get("/api/config", async (_req, res) => {
+  r.get("/api/config", (_req, res) => {
     const body: PublicConfig = {
       appName: config.appName,
       ensParent: config.ens.parentOrNull() ?? "",
@@ -174,7 +174,7 @@ export function createApi(): Router {
       hederaNetwork: "testnet",
       paymentAsset: config.hedera.paymentAsset,
       ledgerAddress: config.hedera.ledgerAddressOrNull(),
-      zeroG: { enabled: config.zeroG.enabled(), network: config.zeroG.network(), model: config.zeroG.model() ?? (await resolveModel().then((m) => m.id, () => "")) },
+      zeroG: { enabled: config.zeroG.enabled(), network: config.zeroG.network(), model: config.zeroG.enabled() ? currentModelId() : config.llm.model },
       namera: { enabled: config.namera.enabled() },
       escrow: { address: config.escrow.addressOrNull(), token: config.escrow.tokenOrNull(), chainId: ESCROW_CHAIN_ID },
       sepoliaRpcUrl: config.sepolia.publicRpcUrl,
@@ -393,6 +393,12 @@ export function createApi(): Router {
   // ------------------------------------------------------------------ proof-of-work tasks
   r.get("/api/tasks", (_req, res) => {
     res.json(listTasks().map(taskView));
+  });
+
+  // The public part only: hidden tests stay with the verifier.
+  r.get("/api/tasks/templates", async (_req, res) => {
+    const slugify = await loadTemplate("slugify").then((t) => t.spec, () => null);
+    res.json(slugify ? [{ id: "slugify", ...slugify }] : []);
   });
 
   r.post("/api/tasks", async (req, res) => {

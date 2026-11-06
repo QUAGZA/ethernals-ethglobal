@@ -1,14 +1,14 @@
 /**
  * pnpm demo:reset — a clean slate for the demo: a fresh HireLedger (every score back to 3.00), agents
- * re-registered on it, ENS records reset, buyer agents topped up, hires and Arena state cleared.
- * People and their agents (and Hedera accounts) are kept. Stop `pnpm dev` first.
+ * re-registered on it, ENS records reset, buyer agents topped up, and hires, tasks, duels, receipts, spend events and
+ * Arena state cleared. People, their agents, Hedera accounts and 0G brain keys are kept. Stop `pnpm dev` first.
  */
 import { namehash } from "viem/ens";
 import { formatUnits6, parseUnits6 } from "@ethernals/shared";
 import { providerKeyShort } from "../src/agents";
 import { config, writeEnvValue } from "../src/config";
 import { personHash, providerKey } from "../src/crypto";
-import { getDb, getPerson, listAgents, updateAgent } from "../src/db";
+import { clearTaskData, getDb, getPerson, listAgents, resetBrainCredit, updateAgent } from "../src/db";
 import { initialRecords, setRecords } from "../src/ens";
 import { fundFromOperator, getPaymentBalanceUnits } from "../src/hedera";
 import { deployLedger, registerAgentOnLedger } from "../src/ledger";
@@ -29,6 +29,9 @@ run(async () => {
   const farm = listAgents().filter((a) => a.arena_role);
   db.prepare("DELETE FROM agents WHERE arena_role IS NOT NULL").run();
   ok(`Cleared (removed ${farm.length} Arena farm agents; run pnpm arena:prepare again)`);
+  clearTaskData();
+  resetBrainCredit(config.zeroG.seedCreditNeuron());
+  ok("Cleared tasks, duels, receipts and spend events; brain credit back to the seed (the escrow and old tasks stay on-chain)");
 
   title("3/4 Re-registering sellers and resetting ENS");
   for (const agent of listAgents("seller")) {

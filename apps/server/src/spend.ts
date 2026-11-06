@@ -45,9 +45,10 @@ export function queueFor(address: string): SerialQueue {
 export type CallSender = (call: { to: Hex; data: Hex; value: bigint }) => Promise<Hex>;
 
 function agentSender(buyer: AgentRow): CallSender {
-  const account = privateKeyToAccount(decryptSecret(buyer.enc_private_key) as Hex);
-  const wallet = createWalletClient({ account, chain: sepolia, transport: http(config.sepolia.rpcUrl(), { timeout: 60_000 }) });
   return async (call) => {
+    // Built on first use, so reading a policy needs no RPC settings.
+    const account = privateKeyToAccount(decryptSecret(buyer.enc_private_key) as Hex);
+    const wallet = createWalletClient({ account, chain: sepolia, transport: http(config.sepolia.rpcUrl(), { timeout: 60_000 }) });
     const hash = await wallet.sendTransaction(call);
     const receipt = await sepoliaPublic.waitForTransactionReceipt({ hash, timeout: 180_000 });
     if (receipt.status !== "success") throw new Error(`Transaction ${hash} reverted.`);
