@@ -13,6 +13,7 @@ import { agentGate } from "./gate";
 import { log } from "./events";
 import { llmMode } from "./llm";
 import { createSellerPaymentMiddleware, facilitatorSupportsHedera } from "./payments";
+import { startEscrowWatcher } from "./settlement";
 import { startUnratedSweeper } from "./verifier";
 
 const app = express();
@@ -28,7 +29,7 @@ app.use(createApi());
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof AppError) {
-    res.status(err.status).json({ error: err.message, hint: err.hint });
+    res.status(err.status).json({ error: err.message, hint: err.hint, ...err.details });
     return;
   }
   if (err instanceof ConfigError) {
@@ -46,7 +47,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 getDb();
 app.listen(config.serverPort, () => {
   log.info(`server listening on http://127.0.0.1:${config.serverPort} (public URL ${config.publicBaseUrl})`);
-  log.info(`LLM: ${llmMode()} · World: ${config.world.env}/${config.world.humanMode} · payments: ${config.hedera.paymentAsset} on Hedera testnet`);
+  log.info(`LLM: ${config.zeroG.enabled() ? `0G Router (${config.zeroG.network()})` : llmMode()} · World: ${config.world.env}/${config.world.humanMode} · payments: ${config.hedera.paymentAsset} on Hedera testnet`);
   if (config.devFakePersons) log.warn("DEV_FAKE_PERSONS=true: people are NOT verified. Turn this off before the demo.");
   if (!config.hedera.ledgerAddressOrNull()) log.warn("HIRE_LEDGER_ADDRESS is empty. Run: pnpm deploy:ledger");
   void facilitatorSupportsHedera().then((r) =>
@@ -54,3 +55,4 @@ app.listen(config.serverPort, () => {
   );
 });
 startUnratedSweeper();
+startEscrowWatcher();

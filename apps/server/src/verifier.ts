@@ -12,11 +12,12 @@ import {
   toMirrorTxId,
   type Reason,
 } from "@ethernals/shared";
+import { creditEarnings } from "./brain";
 import { personHash } from "./crypto";
-import { getAgent, getHire, getMandateForHire, getPerson, listStaleUnratedHires, updateHire, type HireRow } from "./db";
+import { getAgent, getHire, getMandateForHire, getPerson, kvGet, kvSet, listStaleUnratedHires, updateHire, type HireRow } from "./db";
 import { AppError } from "./errors";
 import { emit, log } from "./events";
-import { queueReputationUpdate, queueTotalsUpdate } from "./ens";
+import { queueEarningsUpdate, queueReputationUpdate, queueTotalsUpdate } from "./ens";
 import { verifyPaymentOnMirror } from "./hedera";
 import { isPersonCredentialValid } from "./identity";
 import { paymentRef, recordHire, ZERO_HASH } from "./ledger";
@@ -81,6 +82,12 @@ async function processHire(hireId: string): Promise<void> {
       return;
     }
     updateHire(hire.id, { paid_amount: payment.amountUnits!.toString() });
+    // A failed ledger write retries this function, and a fee must only credit the brain once.
+    const earnedKey = `earned.hire.${hire.id}`;
+    if (!kvGet<boolean>(earnedKey)) {
+      kvSet(earnedKey, true);
+      creditEarnings(seller, payment.amountUnits!);
+    }
 
     const buyerPerson = getPerson(buyer.person_id);
     const verified = buyerPerson ? await isPersonCredentialValid(buyerPerson, buyer) : false;
@@ -123,7 +130,9 @@ async function processHire(hireId: string): Promise<void> {
     });
 
     if (isCountedReason(reason)) {
-      queueReputationUpdate(seller, hire.id);
+      queueReputationUpdate(seller, hire.id); // also writes earnings and task counts, so one settlement is one transaction
+    } else {
+      queueEarningsUpdate(seller);
     }
     queueTotalsUpdate(seller);
   } catch (err) {
