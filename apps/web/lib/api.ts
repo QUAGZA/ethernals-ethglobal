@@ -31,6 +31,8 @@ import type {
   TryOverspendResponse,
   VerifierHealth,
   RunProofRequest,
+  SandboxRunView,
+  StartSandboxRunRequest,
   SubcontractRequest,
   SubcontractResponse,
   WorldVerifyRequest,
@@ -159,6 +161,11 @@ export const api = {
   connectNamera: (body: ConnectNameraRequest) => post<SpendPolicyView>("/api/me/spend/connect", body),
   disconnectNamera: () => request<{ ok: boolean }>("/api/me/spend", { method: "DELETE" }),
   tryOverspend: () => post<TryOverspendResponse>("/api/me/spend/try-overspend"),
+
+  sandboxRuns: () => get<SandboxRunView[]>("/api/sandbox/runs"),
+  sandboxRun: (id: string) => get<SandboxRunView>(`/api/sandbox/runs/${encodeURIComponent(id)}`),
+  startSandboxRun: (body: StartSandboxRunRequest) => post<SandboxRunView>("/api/sandbox/runs", body),
+  stopSandboxRun: (id: string) => post<SandboxRunView>(`/api/sandbox/runs/${encodeURIComponent(id)}/stop`),
 
   proofs: () => get<ProofView[]>("/api/proofs"),
   runProof: (body: RunProofRequest) => post<ProofView>("/api/proofs/demo", body),
