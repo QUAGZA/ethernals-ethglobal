@@ -134,6 +134,41 @@ export const config = {
     reputation: str("ERC8004_REPUTATION_REGISTRY", "0x8004B663056A597Dffe9eCcC1965A193B7388713") as `0x${string}`,
   },
 
+  /** 0G Compute Router: where every agent thinks. Getters so values are read when used. */
+  zeroG: {
+    enabled: () => bool("ZG_ENABLED", false),
+    network: (): "testnet" | "mainnet" => (str("ZG_NETWORK", "testnet") === "mainnet" ? "mainnet" : "testnet"),
+    routerBaseUrl: () => str("ZG_ROUTER_BASE_URL", "https://router-api-testnet.integratenetwork.work/v1").replace(/\/+$/, ""),
+    managementKey: () => str("ZG_MANAGEMENT_KEY") || null,
+    apiKeyOrNull: () => str("ZG_API_KEY") || null,
+    apiKey: () => need("ZG_API_KEY", `Create an API key (sk-...) at pc.testnet.0g.ai (${SETUP}, 0G Compute step).`),
+    model: () => str("ZG_MODEL") || null,
+    seedCreditNeuron: () => BigInt(str("ZG_SEED_CREDIT_NEURON", "300000000000000000")),
+    minCreditNeuron: () => BigInt(str("ZG_MIN_CREDIT_NEURON", "60000000000000000")),
+    neuronPerUsdc: () => BigInt(str("ZG_NEURON_PER_USDC", "2000000000000000000")),
+  },
+
+  /** TaskEscrow and tUSDC live on Ethereum Sepolia. */
+  escrow: {
+    address: () => need("TASK_ESCROW_ADDRESS", `Run: pnpm deploy:escrow (${SETUP}, proof-of-work steps).`) as `0x${string}`,
+    token: () => need("MOCK_USDC_ADDRESS", `Run: pnpm deploy:escrow (${SETUP}, proof-of-work steps).`) as `0x${string}`,
+    addressOrNull: () => (str("TASK_ESCROW_ADDRESS") || null) as `0x${string}` | null,
+    tokenOrNull: () => (str("MOCK_USDC_ADDRESS") || null) as `0x${string}` | null,
+    validationRegistry: () => str("ERC8004_VALIDATION_REGISTRY", "0x8004Cb1BF31DAf7788923b405b754f57acEB4272") as `0x${string}`,
+    defaultBounty: () => str("TASK_DEFAULT_BOUNTY", "2.00"),
+    clientStartingTusdc: () => str("TASK_CLIENT_STARTING_TUSDC", "10"),
+  },
+
+  verifierService: {
+    url: () => str("VERIFIER_URL", "http://127.0.0.1:4100").replace(/\/+$/, ""),
+    token: () => need("VERIFIER_TOKEN", `Run: pnpm verifier:setup (${SETUP}, proof-of-work steps).`),
+  },
+
+  namera: {
+    enabled: () => bool("NAMERA_ENABLED", true),
+    apiUrl: () => str("NAMERA_API_URL") || undefined,
+  },
+
   arena: {
     fakeReviewers: int("ARENA_FAKE_REVIEWERS", 20),
     farmHires: int("ARENA_FARM_HIRES", 20),

@@ -7,8 +7,9 @@ import { ZodError } from "zod";
 import { createApi } from "./api";
 import { handleSellerTask } from "./agent-runtime";
 import { config, ConfigError } from "./config";
-import { getAgentByLabel, getDb } from "./db";
+import { getDb } from "./db";
 import { AppError } from "./errors";
+import { agentGate } from "./gate";
 import { log } from "./events";
 import { llmMode } from "./llm";
 import { createSellerPaymentMiddleware, facilitatorSupportsHedera } from "./payments";
@@ -19,15 +20,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", true);
 app.use(express.json({ limit: "64kb" }));
 
-// Unknown agents get a plain 404 before the x402 middleware tries to quote them.
-app.use("/a/:label/task", (req, res, next) => {
-  const agent = getAgentByLabel(String(req.params.label));
-  if (!agent || agent.kind !== "seller") {
-    res.status(404).json({ error: `No agent named ${req.params.label}.` });
-    return;
-  }
-  next();
-});
+app.use("/a/:label/task", agentGate);
 app.use(createSellerPaymentMiddleware());
 app.post("/a/:label/task", handleSellerTask);
 
