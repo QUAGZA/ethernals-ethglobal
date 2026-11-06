@@ -1,0 +1,8 @@
+{
+  "title": "Fix slugify on real titles",
+  "issueFile": "issue.md",
+  "repoUrl": "",
+  "baseCommit": "",
+  "testCommand": "pytest -q",
+  "note": "Push demo/tasks/slugify/repo to a public GitHub repo, then fill repoUrl and baseCommit (full 40-char SHA). good.patch passes the hidden tests, weak.patch passes the public tests but fails the hidden ones."
+}

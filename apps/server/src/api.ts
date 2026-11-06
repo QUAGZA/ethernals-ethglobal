@@ -35,6 +35,7 @@ import { AppError, badRequest, conflict, forbidden, notFound, unauthorized } fro
 import { emit, log, recentEvents, subscribe } from "./events";
 import { getBalances } from "./hedera";
 import { createRpContext, verifyWorldProof } from "./identity";
+import { capabilitiesOf, getProofView, listProofViews, runDemoProof, runSubcontract } from "./proofs";
 import { submitRating } from "./verifier";
 import { agentDetail, agentView, hireView, personView } from "./views";
 
@@ -341,6 +342,31 @@ export function createApi(): Router {
     const attacker = req.body?.attacker === "other" ? "other" : "provider";
     runEthernalsAttack(attacker);
     res.json(await getArenaState());
+  });
+
+  // ------------------------------------------------------------------ verified work (validation receipts)
+  r.post("/api/proofs/demo", async (req, res) => {
+    const body = z.object({ patch: z.enum(["good", "weak"]), agent: z.string().max(32).optional() }).parse(req.body ?? {});
+    res.json(await runDemoProof(body.patch, body.agent));
+  });
+
+  r.post("/api/proofs/subcontract", async (req, res) => {
+    const body = z
+      .object({ agent: z.string().max(32), specialist: z.string().max(32), specialistPatch: z.enum(["good", "weak"]).optional() })
+      .parse(req.body ?? {});
+    res.json(await runSubcontract(body.agent, body.specialist, body.specialistPatch ?? "good"));
+  });
+
+  r.get("/api/proofs", async (_req, res) => {
+    res.json(await listProofViews());
+  });
+
+  r.get("/api/proofs/:id", async (req, res) => {
+    res.json(await getProofView(String(req.params.id)));
+  });
+
+  r.get("/api/agents/:label/capabilities", (req, res) => {
+    res.json(capabilitiesOf(String(req.params.label)));
   });
 
   // ------------------------------------------------------------------ admin (demo)

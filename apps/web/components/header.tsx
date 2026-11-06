@@ -8,6 +8,7 @@ import { StatusBanners } from "./status-banners";
 const links = [
   { href: "/arena", label: "ARENA" },
   { href: "/agents", label: "AGENTS" },
+  { href: "/proofs", label: "PROOFS" },
   { href: "/provider", label: "PROVIDE" },
   { href: "/#protocol", label: "HOW IT COUNTS" },
 ];
