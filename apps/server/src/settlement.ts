@@ -111,7 +111,7 @@ export async function pollEscrow(waitMs = RECORD_WAIT_MS): Promise<void> {
         if (status === "Passed" || status === "Failed") await settle(task, status === "Passed", waitMs);
         else if (status === "Refunded") refunded(task);
       } catch (err) {
-        log.warn("escrow poll failed", { taskId: task.id, error: (err as Error).message });
+        log.warn("escrow poll failed", { taskId: task.id, error: (err as Error).message.split("\n")[0] });
       }
     }),
   );

@@ -12,7 +12,7 @@ import { ExtLink } from "./ext-link";
 import { PageHeading } from "./page-heading";
 import { SignInGate } from "./sign-in-gate";
 import { TASK_EVENTS } from "./task-detail-view";
-import { FIELD, PRIMARY_BUTTON, StatusChip, VerifierConsole, useVerifyLog } from "./task-bits";
+import { FIELD, PRIMARY_BUTTON, StatusChip, VerifierConsole, isFinished, useVerifyLog } from "./task-bits";
 import { useSpecialists } from "./task-new-view";
 
 const DEFAULT_BOUNTY = "2.00";
@@ -42,7 +42,7 @@ function DuelColumn({ task }: { task: TaskDetail }) {
           Score {task.scoreChange.before ?? "?"} → <strong className="text-yellow">{task.scoreChange.after}</strong>
         </p>
       )}
-      <VerifierConsole lines={log.lines} status={log.status} tall />
+      <VerifierConsole lines={log.lines} status={log.status} finished={isFinished(task.status)} tall />
       <div>
         <p className="eyebrow m-0 mb-1 opacity-60">0G request ids</p>
         {task.inference.length === 0 ? (

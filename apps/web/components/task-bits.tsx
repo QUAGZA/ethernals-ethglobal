@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { InferenceReceipt, SpendEventView, SpendStateView, TaskStatus } from "@ethernals/shared";
 import Link from "next/link";
-import { neuronTo0g, shortHex, timeOf } from "@/lib/format";
+import { neuronTo0g, timeOf } from "@/lib/format";
 import { useEvents } from "@/lib/use-events";
 import { ExtLink } from "./ext-link";
 
@@ -98,7 +98,7 @@ export function useVerifyLog(taskId: string | null | undefined): { lines: string
   return { lines, status };
 }
 
-export function VerifierConsole({ lines, status, tall = false }: { lines: string[]; status: string | null; tall?: boolean }) {
+export function VerifierConsole({ lines, status, tall = false, finished = false }: { lines: string[]; status: string | null; tall?: boolean; finished?: boolean }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const box = end.current?.parentElement;
@@ -106,7 +106,7 @@ export function VerifierConsole({ lines, status, tall = false }: { lines: string
   }, [lines.length]);
   return (
     <div className={`overflow-auto bg-ink p-4 text-[12px] leading-[1.6] text-paper ${tall ? "h-[340px] text-[14px]" : "h-[240px]"}`} role="log" aria-live="polite">
-      {lines.length === 0 && <p className="m-0 opacity-60">{status ?? "Waiting for the verifier…"}</p>}
+      {lines.length === 0 && <p className="m-0 opacity-60">{status ?? (finished ? "This run has finished. The signed result holds the outcome." : "Waiting for the verifier…")}</p>}
       {lines.map((line, index) => (
         <div key={index} className="break-all whitespace-pre-wrap">
           {line}
@@ -161,4 +161,5 @@ export function SpendEvents({ events }: { events: SpendEventView[] }) {
   );
 }
 
-export const shortId = (id: string | null | undefined) => shortHex(id, 8);
+const FINISHED: TaskStatus[] = ["passed", "failed", "refunded"];
+export const isFinished = (status: TaskStatus) => FINISHED.includes(status);

@@ -4,6 +4,8 @@
 
 *Bots can pay. Only people can vouch.*
 
+**v2:** AI agents that think on 0G, get paid over x402 on Hedera only when hidden tests pass, spend only what Namera lets them, and earn a record that only different verified humans can move.
+
 Built at ETHGlobal Mumbai (Nov 2026) for the World, ENS and Hedera partner prizes.
 
 ---
@@ -54,7 +56,7 @@ Buyer-agent CLI ─────────────────────�
 
 | Path | What |
 |---|---|
-| `apps/web` | Next.js app: `/arena`, `/agents`, `/agents/[label]`, `/signup`, `/provider`, `/me` |
+| `apps/web` | Next.js app: `/arena`, `/agents`, `/agents/[label]`, `/tasks`, `/tasks/new`, `/tasks/[id]`, `/duel`, `/signup`, `/provider`, `/me` |
 | `apps/server` | Express server, verifier, x402, ENS/Hedera/World integrations, ops scripts in `scripts/` |
 | `packages/contracts` | `HireLedger.sol` and its Hardhat tests (9, including the PRD worked example) |
 | `packages/shared` | Scoring math that mirrors the contract, reason codes, ENS keys, API types |
@@ -97,6 +99,46 @@ How the code enforces it:
 
 The counting rule only needs to know whether two hires come from the same human. So Ethernals requests the **minimum sufficient credential**, World ID's proof of human (`proofOfHuman`), and stores only the action-scoped nullifier. We ask for no name, age, country or document data. See [WORLD_INTEGRATION.md](WORLD_INTEGRATION.md).
 
+## Proof-of-work tasks (v2)
+
+v1 proves who is vouching. v2 also proves the work was done before anyone is paid.
+
+### Who does what
+
+| Partner tech | Role in the product | Where it runs |
+|---|---|---|
+| **x402 on Hedera** | Every agent-to-agent payment: the client's agent pays the specialist's attempt fee | Hedera testnet (USDC) |
+| **Hedera EVM** | The HireLedger: the public counting rule and reputation | Hedera testnet |
+| **0G Compute** | Every agent's brain: one API key per agent, a receipt for every call, and earnings that credit the brain | 0G Router |
+| **Namera** | Spending controls: a session key limited by on-chain policy. An over-limit bounty is blocked | Ethereum Sepolia |
+| **ENSv2** | Agent names and public credit report: capabilities, brain, verified tasks, score, price | Sepolia |
+| **World ID** | Unique-human proof for providers and clients, which powers the counting rule | World |
+| **ERC-8004** | Agent identity and validation records | Sepolia |
+
+The escrow is on Sepolia because Namera supports Sepolia and not Hedera. Hedera stays the payments and reputation chain.
+
+### How a task flows
+
+1. A client posts a Python code-fix task. Hidden tests go only to the verifier; their hash is committed on-chain.
+2. The bounty is funded through a spend guard. Over the limit, it is blocked: nothing is created and the rule is shown.
+3. The client's agent hires a specialist with an x402 attempt fee on Hedera. The specialist accepts on-chain, thinks on 0G and submits a patch.
+4. The sandbox verifier runs the hidden tests, signs the result, settles the escrow and answers the ERC-8004 validation request.
+5. **PASS pays the specialist and counts as a 5-star vote. FAIL refunds the client and counts as a 1-star vote.** The v1 rule still applies: one vote per person, never from the agent's own provider.
+6. ENS updates in one transaction, and the earnings credit the agent's brain.
+
+### The Duel
+
+`/duel` gives the same task to `fixer` (careful) and `weak-fixer` (a demo agent that misses edge cases). The weak agent's patch is scripted from `demo/tasks/slugify/weak.patch`, and its ENS description says so. Its explanation, payments, tests and rating are all real.
+
+### Disclosures
+
+- **Brain credit is internal accounting.** The conversion rate from USDC to credit is set by us. The Router balance is the platform's treasury, funded from the testnet faucet. Credit tracks what each agent has earned versus spent.
+- **A dormant agent cannot wake itself.** An agent below the minimum credit refuses hires before any payment, so a buyer never pays an agent that can't think. Today it needs a manual top-up.
+- **The direct guard is weaker.** People who haven't connected Namera use limits enforced only by our server, and the UI labels them that way.
+- **The live verifier log is test output.** It is streamed during the run; see `docs/proof-of-work/VERIFIER.md` for what the sandbox does and doesn't isolate.
+
+Prompts and completions are never stored. Receipts hold only ids, token counts and costs. Hidden tests stay with the verifier.
+
 ## Sponsor checklist
 
 - **World (Agent Pass + IDKit):**
@@ -119,6 +161,15 @@ The counting rule only needs to know whether two hires come from the same human.
 | HireLedger deployment | _paste the HashScan contract link printed by `pnpm deploy:ledger`_ |
 | A counted hire (x402 payment) | _paste a HashScan link from an agent page_ |
 | A `SAME_PERSON` hire (paid, not counted) | _paste a HashScan link_ |
+| x402 attempt fee for a task | _paste a HashScan link from a task page_ |
+| x402 verification fee (if paid verification is on) | _paste a HashScan link_ |
+
+### 0G evidence (fill in after your first live run)
+
+| What | Request id |
+|---|---|
+| An agent's first thought | _paste from `GET /api/agents/fixer/inference`_ |
+| A code fix | _paste from a task page's "Thought on 0G" card_ |
 
 ## Built with AI
 

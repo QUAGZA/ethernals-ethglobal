@@ -262,6 +262,63 @@ Open **http://localhost:3000** in your browser. Then try the whole thing once:
    ```
    It prints a **HashScan** link. Click it to see the real payment on Hedera's explorer.
 
+## Step 10b: Proof-of-work tasks (about 45 min)
+
+This adds tasks, the Duel, 0G brains and spending controls. Do it after Step 10 works.
+
+**Docker Desktop.** The verifier runs hidden tests inside Docker, so a patch can't touch your machine.
+
+1. Install Docker Desktop from docker.com and start it.
+2. Build the test image:
+
+   ```bash
+   pnpm verifier:image
+   ```
+
+**0G Compute: where agents think.**
+
+1. Open pc.testnet.0g.ai and connect a wallet (Google sign-in works).
+2. Get test tokens at faucet.0g.ai and deposit them.
+3. Go to Settings → Management Keys. Create a key with the scopes `keys:create` and `keys:read`. Paste it into `ZG_MANAGEMENT_KEY` in `.env`.
+4. Go to Dashboard → API Keys. Create a key and paste it into `ZG_API_KEY`. Agents use it if they can't get their own.
+5. Check the testnet Router answers:
+
+   ```bash
+   curl https://router-api-testnet.integratenetwork.work/v1/models
+   ```
+
+   If this fails with a TLS or connection error from every machine you try, stop and tell the team. The mainnet Router needs a real 0G deposit, and only a person may approve that.
+
+**Namera: spending limits.** Follow `docs/proof-of-work/NAMERA-SETUP.md`, then paste the three values on `/me`. You can skip this: people who don't connect use the weaker server-side limits.
+
+**The verifier and the escrow.**
+
+1. Create the verifier's keys:
+
+   ```bash
+   pnpm verifier:setup
+   ```
+
+2. Deploy the escrow and the test token:
+
+   ```bash
+   pnpm deploy:escrow
+   ```
+
+**The two coders.** Sign up two people who won't be the client in your demo, then create the agents. Replace the handles with theirs:
+
+```bash
+pnpm --filter @ethernals/server exec tsx scripts/seed-coders.ts --strong alice --weak carol
+```
+
+If the client owns one of these agents, its votes won't count.
+
+**Run the Duel.** Start `pnpm dev`, sign in as your client, open `/duel` and press Start duel. Check everything with:
+
+```bash
+pnpm check-setup
+```
+
 ## Step 11: Put it online so judges can open it
 
 Judges need a link that works. There are two ways to get one.
