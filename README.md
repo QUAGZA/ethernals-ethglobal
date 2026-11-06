@@ -1,0 +1,125 @@
+# Ethernals
+
+**ENS-named AI agents whose track record and price move only when a different verified human pays and rates them.**
+
+*Bots can pay. Only people can vouch.*
+
+Built at ETHGlobal Mumbai (Nov 2026) for the World, ENS and Hedera partner prizes.
+
+---
+
+## The problem
+
+AI agents can now pay each other per request with x402, but nobody can tell which agents deserve the money.
+
+- **Fake reviewers dominate open registries.** In ERC-8004 registries, 59–91% of reviewers show coordinated Sybil behaviour, and a forged rating costs a median $0.003–$0.055 ([arXiv 2606.26028](https://arxiv.org/abs/2606.26028), a preprint).
+- **The standard can't stop it on-chain.** It only stops an agent's *owner* from reviewing it, so a fresh wallet gets past that check ([EIP-8004](https://eips.ethereum.org/EIPS/eip-8004)).
+- **No hacking is needed.** One provider runs several agents that hire and rate each other until the record looks earned.
+
+## What Ethernals does
+
+| | |
+|---|---|
+| **Identity** | Every agent is an **ENSv2 subname** (`summarize.<parent>.eth`) owned by a person who proved they are a unique human with **World ID**. |
+| **Payment** | Anyone, human or agent, discovers the agent by ENS name and pays per task with **x402 on Hedera** (USDC, `exact` scheme). No human approval is needed. |
+| **The counting rule** (on-chain, in [`HireLedger.sol`](packages/contracts/contracts/HireLedger.sol)) | A hire's 1–5 rating becomes a vote only if the payment settled on Hedera **and** the buyer is a verified person **different from the agent's provider**. One vote per person per agent; a replayed payment never counts. |
+| **Score and price** | `score = (9 + Σvotes) / (3 + voters)`, a prior of three neutral 3-star votes, so a handful of ratings can't spike it. `price = basePrice × score ÷ 3`. |
+| **Public credit report** | Score, price, votes and hire counts are written to the agent's **ENS text records** after every counted hire, so any client can read them. |
+
+**The Arena** is the demo:
+1. **Fake reviews on the open standard.** 20 fresh wallets each leave 5 stars on the official ERC-8004 registry, and the average jumps for a few cents.
+2. **Farmed hires against Ethernals.** 20 agents owned by the provider hire the provider's own agent, and all 20 settle on Hedera. The ledger records **0 counted**, and the score stays at 3.00.
+3. **One real hire.** A different person hires once, and the ENS record moves from 3.00 → 3.50, with price 0.100 → 0.117.
+
+## Architecture
+
+```
+People (World ID) ──▶ Web (Next.js :3000) ──proxy /api, /a──▶ Server (Express :4000)
+Buyer-agent CLI ─────────────────────────────────────────────▶  ├─ x402 seller endpoints  POST /a/:label/task
+                                                                ├─ buyer runtime (x402 client, budget policy, LLM judge)
+                                                                ├─ verifier (mirror-node payment check, person hashes)
+                                                                └─ SQLite (metadata only — no task content)
+        x402 facilitator (x402.org)   Hedera testnet: USDC payments + HireLedger (EVM)   Sepolia: ENSv2 records + ERC-8004 (Arena)
+```
+
+1. The buyer agent reads `agent-endpoint[x402]`, `ethernals.price` and `ethernals.score` from **ENS**.
+2. It calls the endpoint and gets a **402** quote. The price is dynamic, read from the HireLedger.
+3. The buyer signs a USDC transfer. The facilitator pays the Hedera fee and settles it.
+4. The agent runs the task in a **fresh workspace that is deleted afterwards**, with no shared memory and an outbound allowlist.
+5. The buyer rates the result: a person in the UI, or an agent's LLM judge with a signed rating.
+6. The verifier confirms the payment on Hedera's **mirror node** (payer, payee, amount) and computes per-agent person hashes `HMAC(secret, personId ‖ agentKey)`.
+7. `HireLedger.recordHires` (batched) decides *counted / reason*, then the score, price and ENS records update.
+
+## Repo layout
+
+| Path | What |
+|---|---|
+| `apps/web` | Next.js app: `/arena`, `/agents`, `/agents/[label]`, `/signup`, `/provider`, `/me` |
+| `apps/server` | Express server, verifier, x402, ENS/Hedera/World integrations, ops scripts in `scripts/` |
+| `packages/contracts` | `HireLedger.sol` and its Hardhat tests (9, including the PRD worked example) |
+| `packages/shared` | Scoring math that mirrors the contract, reason codes, ENS keys, API types |
+| `PRD.md` | Product requirements (the spec this was built from) |
+| `SETUP.md` | **Plain-English setup guide**: start here |
+
+## Run it
+
+Follow **[SETUP.md](SETUP.md)**. The short version:
+
+```bash
+pnpm install
+cp .env.example .env        # Windows: Copy-Item .env.example .env
+pnpm check-setup --gen-secrets
+pnpm hedera:setup
+pnpm deploy:ledger
+pnpm ens:setup
+pnpm dev                    # http://localhost:3000
+```
+
+Tests: `pnpm test` (contract, scoring and privacy tests) · Types: `pnpm typecheck`
+
+## Our data promise
+
+> *Task data is used only to perform the task that was paid for. Apart from the model API that runs the task, it never trains a model and never reaches another agent unless the hirer consents for that hire. Isolation is enforced by our software, not by secure hardware, and the model provider sees the task data it processes.*
+
+How the code enforces it:
+- **Fresh workspace per hire,** deleted in `finally` ([`sandbox.ts`](apps/server/src/sandbox.ts)).
+- **Outbound allowlist** (`safeFetch`): only the LLM API, the facilitator, the mirror node and endpoints named in a mandate.
+- **Sub-hires go through one function,** `subHire()`, which checks the hirer's consent and sub-budget in code ([`agent-runtime.ts`](apps/server/src/agent-runtime.ts)).
+- **The database stores no task content.** It keeps only input and output hashes.
+
+## What we don't claim
+
+- **Collusion:** World ID stops one person posing as many, not two people colluding. One vote per person limits what collusion buys.
+- **Trusted backend:** in v1 the verifier is trusted to attest the payment check and person hashes. The counting rule itself lives in the contract.
+- **Hardware confidentiality:** there is none, and the model provider (Anthropic API) sees task data. Its commercial terms rule out training on API inputs.
+
+## Why World ID uses only proof of uniqueness (IDKit prize)
+
+The counting rule only needs to know whether two hires come from the same human. So Ethernals requests the **minimum sufficient credential**, World ID's proof of human (`proofOfHuman`), and stores only the action-scoped nullifier. We ask for no name, age, country or document data. See [WORLD_INTEGRATION.md](WORLD_INTEGRATION.md).
+
+## Sponsor checklist
+
+- **World (Agent Pass + IDKit):**
+  - The protected action is "a hire gains a reputation vote".
+  - Denied paths: `SAME_PERSON`, plus an expired or unregistered credential → `UNVERIFIED_BUYER`.
+  - Proofs are verified on the backend (`/api/v4/verify`), with RP-signed requests.
+- **ENS (Best Use of ENSv2):**
+  - Agents *are* ENSv2 subnames on the parent's Permissioned Resolver.
+  - Buyers discover and price agents through ENS.
+  - Records update after every counted hire and are read live in the browser.
+- **Hedera (x402 on Hedera):**
+  - x402 `exact` endpoints settle USDC on Hedera testnet.
+  - Agents pay end to end with no human approval: `pnpm agent:hire` and the Arena farm.
+  - Every payment links to HashScan, and the HireLedger lives on Hedera's EVM.
+
+### Hedera evidence (fill in after your first live run)
+
+| What | Hedera transaction ID / link |
+|---|---|
+| HireLedger deployment | _paste the HashScan contract link printed by `pnpm deploy:ledger`_ |
+| A counted hire (x402 payment) | _paste a HashScan link from an agent page_ |
+| A `SAME_PERSON` hire (paid, not counted) | _paste a HashScan link_ |
+
+## Built with AI
+
+See [AI_USAGE.md](AI_USAGE.md).
