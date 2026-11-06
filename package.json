@@ -1,23 +1,29 @@
 {
   "name": "ethernals",
-  "version": "0.1.0",
   "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build"
+  "version": "0.1.0",
+  "description": "Ethernals: ENS-named AI agents whose track record and price move only when a different verified human pays and rates them.",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=22.13.0"
   },
-  "dependencies": {
-    "next": "^16.4.5",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+  "scripts": {
+    "dev": "concurrently -k -n web,server -c yellow,cyan \"pnpm --filter @ethernals/web dev\" \"pnpm --filter @ethernals/server dev\"",
+    "build": "pnpm --filter @ethernals/web build",
+    "start": "concurrently -k -n web,server -c yellow,cyan \"pnpm --filter @ethernals/web start\" \"pnpm --filter @ethernals/server start\"",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "contracts:build": "pnpm --filter @ethernals/contracts build",
+    "check-setup": "pnpm --filter @ethernals/server exec tsx scripts/doctor.ts",
+    "hedera:setup": "pnpm --filter @ethernals/server exec tsx scripts/hedera-setup.ts",
+    "deploy:ledger": "pnpm --filter @ethernals/server exec tsx scripts/deploy-ledger.ts",
+    "ens:setup": "pnpm --filter @ethernals/server exec tsx scripts/ens-setup.ts",
+    "ens:sync": "pnpm --filter @ethernals/server exec tsx scripts/ens-sync.ts",
+    "arena:prepare": "pnpm --filter @ethernals/server exec tsx scripts/arena-prepare.ts",
+    "agent:hire": "pnpm --filter @ethernals/server exec tsx scripts/agent-hire.ts",
+    "demo:reset": "pnpm --filter @ethernals/server exec tsx scripts/demo-reset.ts"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.4",
-    "@types/node": "^26.6.6",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "postcss": "^8.5.32",
-    "tailwindcss": "^4.3.4",
-    "typescript": "^7.0.2"
+    "concurrently": "^10.0.0"
   }
 }

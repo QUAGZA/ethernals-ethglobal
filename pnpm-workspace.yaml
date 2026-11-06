@@ -1,0 +1,17 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Packages allowed to run install scripts (pnpm blocks them by default).
+allowBuilds:
+  esbuild: true
+  keccak: true
+  protobufjs: true
+  sharp: true
+  secp256k1: true
+  bufferutil: true
+  utf-8-validate: true
+  "@parcel/watcher": true
+
+minimumReleaseAgeExclude:
+  - '@anthropic-ai/sdk@1.6.0'

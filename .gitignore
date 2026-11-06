@@ -4,6 +4,21 @@ dist/
 next-env.d.ts
 *.tsbuildinfo
 .DS_Store
+.env
 .env*.local
 .claude/
 .openai/
+
+# Ethernals
+data/
+vendor/
+.notes/
+packages/contracts/artifacts/
+packages/contracts/cache/
+coverage/
+
+# Planning material copied from the Claude session (kept locally, not part of the app)
+.court/
+earnest/
+research_notes/
+reports/
