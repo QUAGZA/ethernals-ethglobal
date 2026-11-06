@@ -3,6 +3,11 @@
  * Used for web hires (on behalf of a signed-in person), sub-hires and the Arena farm.
  */
 import { formatUnits6, hashscanTxUrl, parseUnits6, toMirrorTxId, type Consent, type SubHireOutcome } from "@ethernals/shared";
+import type { Hex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { namehash } from "viem/ens";
+import { assertPublicUrl } from "./agent-tools";
+import { isAgentRegistered, getPrice } from "./ledger";
 import { config } from "./config";
 import { decryptSecret } from "./crypto";
 import { getAgentByEnsName, updateAgent, updateHire, type AgentRow } from "./db";
@@ -73,7 +78,9 @@ export async function hireAsAgent(params: {
   const url = target ? internalTaskUrl(target.label) : found.endpoint;
   if (!url) throw new AppError(404, `${params.targetEnsName} has no x402 endpoint record.`);
 
-  const quote = target ? await quoteUnits(target) : found.price ? parseUnits6(found.price) : 0n;
+  const quote = target
+    ? await quoteUnits(target)
+    : await getPrice(namehash(params.targetEnsName) as Hex).catch(() => (found.price ? parseUnits6(found.price) : 0n));
   const budget = params.maxUnits ?? BigInt(params.buyer.budget_remaining || "0");
   if (quote > budget) {
     throw new AppError(
@@ -81,6 +88,18 @@ export async function hireAsAgent(params: {
       `${params.targetEnsName} costs ${formatUnits6(quote)}, more than this agent's remaining budget ${formatUnits6(budget)}.`,
       "Top up the buyer agent or raise its budget.",
     );
+  }
+
+  if (!target) {
+    // An agent another server hosts: only public addresses, and only if it is registered on the ledger.
+    try {
+      assertPublicUrl(url);
+    } catch (err) {
+      throw new AppError(400, `${params.targetEnsName}'s endpoint is not reachable from here: ${(err as Error).message}`, "Its provider must publish a public PUBLIC_BASE_URL and run pnpm ens:sync.");
+    }
+    if (!(await isAgentRegistered(namehash(params.targetEnsName) as Hex))) {
+      throw new AppError(404, `${params.targetEnsName} is not registered on the HireLedger.`);
+    }
   }
 
   const hosts = [new URL(url).host];
@@ -131,7 +150,7 @@ export async function hireAsAgent(params: {
 
   const rawTx = settlementTxId(response);
   const paymentTxId = rawTx ? toMirrorTxId(rawTx) : null;
-  if (paymentTxId) updateHire(body.hireId, { payment_tx_id: paymentTxId });
+  if (paymentTxId && target) updateHire(body.hireId, { payment_tx_id: paymentTxId });
   if (params.maxUnits === undefined && params.buyer.kind === "buyer") {
     updateAgent(params.buyer.key, { budget_remaining: (budget - quote).toString() });
   }
@@ -141,7 +160,19 @@ export async function hireAsAgent(params: {
     const result = body.result ?? "";
     void (async () => {
       const rating = params.fixedRating ?? (await judge(`Task for ${params.targetEnsName}`, result)).rating;
-      await submitRating({ hireId, rating, paymentTxId: paymentTxId ?? undefined });
+      if (target) {
+        await submitRating({ hireId, rating, paymentTxId: paymentTxId ?? undefined });
+        return;
+      }
+      // The hire lives on the seller's server: send it the rating, signed by the buyer agent's key.
+      const account = privateKeyToAccount(`0x${decryptSecret(params.buyer.enc_private_key).replace(/^0x/, "")}`);
+      const signature = await account.signMessage({ message: `${hireId}:${rating}:${paymentTxId ?? ""}` });
+      await createSafeFetch(hosts)(`${new URL(url).origin}/api/hires/${encodeURIComponent(hireId)}/rate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rating, paymentTxId: paymentTxId ?? undefined, signature }),
+        signal: AbortSignal.timeout(30_000),
+      });
     })().catch((err) => log.error("auto-rating failed", err));
   }
 

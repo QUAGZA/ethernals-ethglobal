@@ -6,6 +6,8 @@ export const RECORD_PREFIX = "ethernals";
 
 export const ENS_KEYS = {
   description: "description",
+  label: `${RECORD_PREFIX}.label`, // the agent's label, so a name can be indexed without a list
+  hedera: `${RECORD_PREFIX}.hedera`, // the agent's Hedera account id
   endpoint: "agent-endpoint[x402]",
   context: "agent-context",
   provider: `${RECORD_PREFIX}.provider`,

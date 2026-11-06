@@ -65,6 +65,10 @@ export interface AgentSummary {
   hiresTotal: number;
   hiresCounted: number;
   createdAt: string;
+  /** True for an agent found on-chain that another server hosts (no local settings, hire only). */
+  remote?: boolean;
+  /** Remote agents only: whether its x402 endpoint answered the last probe. */
+  endpointStatus?: "online" | "offline" | "private" | "unknown";
 }
 
 export interface HireView {
