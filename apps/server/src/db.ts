@@ -26,7 +26,7 @@ export interface AgentRow {
   evm_address: string;
   enc_private_key: string;
   base_price: string; // atomic units
-  task_type: "summarize" | "translate" | null;
+  task_type: "summarize" | "translate" | "code-fix" | null;
   description: string;
   budget_remaining: string; // atomic units (buyer agents)
   ledger_registered: number;

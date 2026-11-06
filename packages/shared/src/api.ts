@@ -4,7 +4,7 @@
  */
 import type { Reason } from "./reasons";
 
-export type TaskType = "summarize" | "translate";
+export type TaskType = "summarize" | "translate" | "code-fix";
 export type AgentKind = "seller" | "buyer";
 export type HumanMode = "idkit" | "agentkit" | "dev";
 
@@ -27,6 +27,10 @@ export interface PublicConfig {
   hederaNetwork: "testnet";
   paymentAsset: "USDC" | "HBAR";
   ledgerAddress: string | null;
+  /** Added by the proof-of-work build (all optional so older servers still type-check). */
+  zeroG?: { enabled: boolean; network: "testnet" | "mainnet"; model: string };
+  namera?: { enabled: boolean };
+  escrow?: { address: string | null; token: string | null; chainId: string };
   /** Public Sepolia RPC the browser uses to read ENS records directly. */
   sepoliaRpcUrl: string;
   /** Optional ENS Universal Resolver override for Sepolia (ENSv2). */
@@ -200,6 +204,19 @@ export type EventType =
   | "arena.open.done"
   | "arena.ethernals.progress"
   | "arena.ethernals.done"
+  // proof-of-work tasks (docs/proof-of-work/PLAN.md)
+  | "task.created"
+  | "task.accepted"
+  | "task.submitted"
+  | "verify.status"
+  | "verify.log"
+  | "verify.result"
+  | "task.settled"
+  | "task.refunded"
+  | "agent.born" // an agent was spun up: Hedera account, 0G brain key, ENS, ERC-8004 (data.step, data.message)
+  | "inference.receipt" // a 0G Compute call finished (data.requestId, data.agentEnsName)
+  | "spend.allowed" // Namera/guard confirmed a spend
+  | "spend.blocked" // Namera/guard refused a spend (data.rule, data.reason)
   | "info";
 
 /** One message on GET /api/events (Server-Sent Events, `data:` is this JSON). */
