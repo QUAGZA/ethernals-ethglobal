@@ -29,7 +29,7 @@ import {
   type EnsKey,
 } from "@ethernals/shared";
 import { config, normalizeEcdsaKey, writeEnvValue } from "./config";
-import { getAgent, updateAgent, updateHire, type AgentRow } from "./db";
+import { countSpecialistTasks, getAgent, getBrain, updateAgent, updateHire, type AgentRow } from "./db";
 import { emit, log } from "./events";
 import { getStats } from "./ledger";
 import { SerialQueue } from "./queue";
@@ -74,6 +74,11 @@ export function platformSepoliaAddress(): Hex {
 }
 
 const sepoliaWrites = new SerialQueue();
+
+/** Runs a transaction from the platform wallet in the shared queue, so nonces never collide. */
+export function runPlatformSepoliaWrite<T>(task: (wallet: ReturnType<typeof sepoliaWallet>) => Promise<T>): Promise<T> {
+  return sepoliaWrites.run(() => task(sepoliaWallet()));
+}
 
 export function agentEnsName(label: string): string {
   return normalize(`${label}.${config.ens.parent()}`);
@@ -214,9 +219,7 @@ export function initialRecords(agent: AgentRow, providerKeyShort: string): Recor
   if (agent.kind === "seller") {
     Object.assign(records, {
       [ENS_KEYS.endpoint]: `${config.publicBaseUrl}/a/${agent.label}/task`,
-      [ENS_KEYS.context]: agent.task_type === "translate"
-        ? "translate · input: text ≤ 8k chars · output: translated text"
-        : "summarize · input: text ≤ 8k chars · output: up to 5 bullets",
+      [ENS_KEYS.context]: agentContext(agent),
       [ENS_KEYS.basePrice]: base,
       [ENS_KEYS.price]: base,
       [ENS_KEYS.score]: "3.00",
@@ -225,6 +228,41 @@ export function initialRecords(agent: AgentRow, providerKeyShort: string): Recor
       [ENS_KEYS.hiresTotal]: "0",
       [ENS_KEYS.ledger]: `hedera:testnet:${config.hedera.ledgerAddressOrNull() ?? "not-deployed"}`,
     });
+    const brain = getBrain(agent.key);
+    if (brain) {
+      records[ENS_KEYS.brain] = `0g-router:${brain.model}`;
+      records[ENS_KEYS.earned] = "0.00";
+    }
+    if (agent.task_type === "code-fix") {
+      Object.assign(records, {
+        [ENS_KEYS.capabilities]: "code-fix:python",
+        [ENS_KEYS.validation]: "hidden-tests:docker",
+        [ENS_KEYS.tasksPassed]: "0",
+        [ENS_KEYS.tasksFailed]: "0",
+      });
+      if (agent.erc8004_agent_id) {
+        records[ENS_KEYS.erc8004] = `eip155:11155111:${config.erc8004.identity}:${agent.erc8004_agent_id}`;
+      }
+    }
+  }
+  return records;
+}
+
+function agentContext(agent: AgentRow): string {
+  if (agent.task_type === "code-fix") return "code-fix · input: a public Python repo and an issue · output: a patch checked by hidden tests";
+  if (agent.task_type === "translate") return "translate · input: text ≤ 8k chars · output: translated text";
+  return "summarize · input: text ≤ 8k chars · output: up to 5 bullets";
+}
+
+/** Records that change when a task settles or an agent earns; written with the score so one settlement is one transaction. */
+export function earningsRecords(seller: AgentRow): Record<string, string> {
+  const records: Record<string, string> = {};
+  const brain = getBrain(seller.key);
+  if (brain) records[ENS_KEYS.earned] = formatUnits6(BigInt(brain.earned_units));
+  if (seller.task_type === "code-fix") {
+    const tasks = countSpecialistTasks(seller.key);
+    records[ENS_KEYS.tasksPassed] = String(tasks.passed);
+    records[ENS_KEYS.tasksFailed] = String(tasks.failed);
   }
   return records;
 }
@@ -247,6 +285,7 @@ export function queueReputationUpdate(seller: AgentRow, hireId: string): void {
       [ENS_KEYS.votes]: String(stats.votes),
       [ENS_KEYS.hiresCounted]: String(stats.hiresCounted),
       [ENS_KEYS.hiresTotal]: String(stats.hiresTotal),
+      ...earningsRecords(seller),
       [ENS_KEYS.updated]: new Date().toISOString(),
     });
     updateHire(hireId, { ens_tx_hash: hash });
@@ -259,6 +298,24 @@ export function queueReputationUpdate(seller: AgentRow, hireId: string): void {
       message: `ENS updated: ${seller.ens_name} score ${formatScore(stats.scoreX1e6)}, price ${formatUnits6(stats.price)}`,
     });
   })().catch((err) => log.error(`ENS reputation update failed for ${seller.ens_name}`, err));
+}
+
+const earningsTimers = new Map<string, NodeJS.Timeout>();
+
+/** Earnings and task counts outside a counted hire. Debounced like totals, so a burst of hires is one write. */
+export function queueEarningsUpdate(seller: AgentRow, delayMs = 30_000): void {
+  if (earningsTimers.has(seller.key)) return;
+  earningsTimers.set(
+    seller.key,
+    setTimeout(() => {
+      earningsTimers.delete(seller.key);
+      void (async () => {
+        const records = earningsRecords(seller);
+        if (Object.keys(records).length === 0) return;
+        await setRecords(seller.ens_name, { ...records, [ENS_KEYS.updated]: new Date().toISOString() });
+      })().catch((err) => log.error(`ENS earnings update failed for ${seller.ens_name}`, err));
+    }, delayMs),
+  );
 }
 
 const totalsTimers = new Map<string, NodeJS.Timeout>();
