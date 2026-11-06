@@ -195,6 +195,13 @@ export function getDb(): DatabaseSync {
 }
 
 function migrate(d: DatabaseSync): void {
+  // A local DB created on another branch may hold an older-shaped inference_receipts
+  // table (no agent_key). Park it under a legacy name so the new schema can be created.
+  const receiptCols = d.prepare("PRAGMA table_info(inference_receipts)").all() as { name: string }[];
+  if (receiptCols.length > 0 && !receiptCols.some((c) => c.name === "agent_key")) {
+    d.exec("DROP INDEX IF EXISTS receipts_agent; DROP INDEX IF EXISTS receipts_task;");
+    d.exec(`ALTER TABLE inference_receipts RENAME TO inference_receipts_legacy_${Date.now()}`);
+  }
   d.exec(`
     CREATE TABLE IF NOT EXISTS persons (
       id TEXT PRIMARY KEY,
