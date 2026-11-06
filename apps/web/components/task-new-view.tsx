@@ -2,13 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useState, type FormEvent } from "react";
-import type { CreateTaskRequest } from "@ethernals/shared";
+import { DRAFT_TEST_PATH, type CalibrationReport, type CreateTaskRequest } from "@ethernals/shared";
 import { api, toApiError, type ApiRequestError } from "@/lib/api";
-import { useLoad } from "@/lib/hooks";
+import { useElapsed, useLoad } from "@/lib/hooks";
 import { EmptyNote, ErrorNotice } from "./error-notice";
 import { PageHeading, Panel } from "./page-heading";
 import { SignInGate } from "./sign-in-gate";
-import { FIELD, PRIMARY_BUTTON, SpendBanner } from "./task-bits";
+import { CalibrationSummary, FIELD, PRIMARY_BUTTON, SECONDARY_BUTTON, SpendBanner } from "./task-bits";
 import { useToast } from "./toast-provider";
 
 const DEFAULT_BOUNTY = "2.00";
@@ -66,12 +66,38 @@ function NewTaskForm() {
   const [minutes, setMinutes] = useState("30");
   const [specialist, setSpecialist] = useState("");
   const [advanced, setAdvanced] = useState(false);
-  const [custom, setCustom] = useState({ title: "", repoUrl: "", baseCommit: "", issue: "", tests: "" });
+  const [custom, setCustom] = useState({ title: "", repoUrl: "", baseCommit: "", issue: "", tests: "", referencePatch: "", naivePatch: "" });
+  const [report, setReport] = useState<CalibrationReport | null>(null);
+  const [draftStartedAt, setDraftStartedAt] = useState<number | null>(null);
+  const [draftError, setDraftError] = useState<ApiRequestError | null>(null);
+  const draftElapsed = useElapsed(draftStartedAt);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiRequestError | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
 
   const template = templates.data?.[0];
+  const drafting = draftStartedAt !== null;
+  const canDraft = Boolean(custom.repoUrl.trim() && custom.baseCommit.trim() && custom.issue.trim()) && !drafting && !busy;
+
+  /** A report only describes what it checked, so any edit but the title clears it. */
+  function editCustom(fields: Partial<typeof custom>) {
+    setCustom((current) => ({ ...current, ...fields }));
+    if (!("title" in fields)) setReport(null);
+  }
+
+  async function draftWithAgent() {
+    setDraftStartedAt(Date.now());
+    setDraftError(null);
+    try {
+      const draft = await api.draftTests({ repoUrl: custom.repoUrl.trim(), baseCommit: custom.baseCommit.trim(), issue: custom.issue.trim() });
+      setCustom((current) => ({ ...current, tests: draft.tests, referencePatch: draft.referencePatch, naivePatch: draft.naivePatch ?? "" }));
+      setReport(draft.calibration);
+    } catch (err) {
+      setDraftError(toApiError(err));
+    } finally {
+      setDraftStartedAt(null);
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -83,7 +109,8 @@ function NewTaskForm() {
       ? {
           ...base,
           spec: { title: custom.title.trim(), repoUrl: custom.repoUrl.trim(), baseCommit: custom.baseCommit.trim(), issue: custom.issue.trim() },
-          hiddenTests: { files: [{ path: "tests_hidden/test_x.py", content: custom.tests }] },
+          hiddenTests: { files: [{ path: DRAFT_TEST_PATH, content: custom.tests }] },
+          checks: { referencePatch: custom.referencePatch || undefined, naivePatch: custom.naivePatch || undefined },
         }
       : { ...base, template: "slugify" };
     try {
@@ -131,17 +158,41 @@ function NewTaskForm() {
               ).map(([key, label, placeholder]) => (
                 <label key={key} className="eyebrow block">
                   {label}
-                  <input className={FIELD} placeholder={placeholder} required value={custom[key]} onChange={(e) => setCustom({ ...custom, [key]: e.target.value })} />
+                  <input className={FIELD} placeholder={placeholder} required value={custom[key]} onChange={(e) => editCustom({ [key]: e.target.value })} />
                 </label>
               ))}
               <label className="eyebrow block">
                 Issue
-                <textarea className={`${FIELD} h-24 resize-y`} required value={custom.issue} onChange={(e) => setCustom({ ...custom, issue: e.target.value })} />
+                <textarea className={`${FIELD} h-24 resize-y`} required value={custom.issue} onChange={(e) => editCustom({ issue: e.target.value })} />
               </label>
+              <div>
+                <button type="button" className={SECONDARY_BUTTON} disabled={!canDraft} onClick={() => void draftWithAgent()}>
+                  {drafting ? `DRAFTING AND CHECKING… ${draftElapsed}s` : "DRAFT TESTS WITH MY AGENT"}
+                </button>
+                <p className="m-0 mt-2 text-[11px] leading-[1.5] opacity-70">
+                  Your agent reads the repo on 0G and writes tests, plus a fix and a shallow fix to check them against. Read them before you fund: this can take a few minutes.
+                </p>
+                <ErrorNotice className="mt-3" error={draftError} title="No draft" />
+              </div>
               <label className="eyebrow block">
-                Hidden tests (tests_hidden/test_x.py)
-                <textarea className={`${FIELD} h-32 resize-y font-mono`} required spellCheck={false} value={custom.tests} onChange={(e) => setCustom({ ...custom, tests: e.target.value })} />
+                Hidden tests ({DRAFT_TEST_PATH})
+                <textarea className={`${FIELD} h-32 resize-y font-mono`} required spellCheck={false} value={custom.tests} onChange={(e) => editCustom({ tests: e.target.value })} />
               </label>
+              {report && <CalibrationSummary report={report} />}
+              <details>
+                <summary className="eyebrow cursor-pointer">Patches to check the tests against (optional)</summary>
+                <p className="m-0 mt-2 text-[11px] leading-[1.5] opacity-70">
+                  Unified diffs against the commit above. The tests must pass with the reference fix and should fail with the naive patch. They are used for this check and not kept.
+                </p>
+                <label className="eyebrow mt-3 block">
+                  Reference fix
+                  <textarea className={`${FIELD} h-28 resize-y font-mono`} spellCheck={false} value={custom.referencePatch} onChange={(e) => editCustom({ referencePatch: e.target.value })} />
+                </label>
+                <label className="eyebrow mt-3 block">
+                  Naive patch
+                  <textarea className={`${FIELD} h-28 resize-y font-mono`} spellCheck={false} value={custom.naivePatch} onChange={(e) => editCustom({ naivePatch: e.target.value })} />
+                </label>
+              </details>
             </div>
           )}
         </Panel>
@@ -165,7 +216,9 @@ function NewTaskForm() {
             </label>
           </div>
           <p className="m-0 mt-4 text-[11px] leading-[1.5] opacity-70">
-            The hidden tests are committed by hash before any work starts, and only the verifier sees them.
+            {advanced
+              ? "The verifier checks your tests before funding, and they must fail on the unfixed code. They are committed by hash, hidden from the specialist, and published with the result once the task settles."
+              : "The hidden tests are committed by hash before any work starts, and only the verifier sees them."}
           </p>
         </Panel>
         {blocked && (
@@ -175,8 +228,8 @@ function NewTaskForm() {
           </div>
         )}
         <ErrorNotice error={error} title="The task was not created" />
-        <button type="submit" disabled={busy || (!advanced && !template)} className={PRIMARY_BUTTON}>
-          {busy ? "LOCKING THE BOUNTY…" : "LOCK THE BOUNTY →"}
+        <button type="submit" disabled={busy || drafting || (!advanced && !template)} className={PRIMARY_BUTTON}>
+          {busy ? (advanced ? "CHECKING TESTS, THEN LOCKING…" : "LOCKING THE BOUNTY…") : "LOCK THE BOUNTY →"}
         </button>
       </div>
     </form>

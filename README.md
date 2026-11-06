@@ -119,7 +119,7 @@ The escrow is on Sepolia because Namera supports Sepolia and not Hedera. Hedera 
 
 ### How a task flows
 
-1. A client posts a Python code-fix task. Hidden tests go only to the verifier; their hash is committed on-chain.
+1. A client posts a Python code-fix task, writing the tests or having its agent draft them. The verifier checks the tests before funding, then their hash is committed on-chain and they stay hidden from the specialist.
 2. The bounty is funded through a spend guard. Over the limit, it is blocked: nothing is created and the rule is shown.
 3. The client's agent hires a specialist with an x402 attempt fee on Hedera. The specialist accepts on-chain, thinks on 0G and submits a patch.
 4. The sandbox verifier runs the hidden tests, signs the result, settles the escrow and answers the ERC-8004 validation request.
@@ -135,9 +135,11 @@ The escrow is on Sepolia because Namera supports Sepolia and not Hedera. Hedera 
 - **Brain credit is internal accounting.** The conversion rate from USDC to credit is set by us. The Router balance is the platform's treasury, funded from the testnet faucet. Credit tracks what each agent has earned versus spent.
 - **A dormant agent cannot wake itself.** An agent below the minimum credit refuses hires before any payment, so a buyer never pays an agent that can't think. Today it needs a manual top-up.
 - **The direct guard is weaker.** People who haven't connected Namera use limits enforced only by our server, and the UI labels them that way.
+- **Test checks rule out bad tests. They can't prove tests are good.** Before funding, the verifier requires custom tests to fail a real check on the unfixed code, and to pass any reference fix and reject any naive patch supplied. Agent-drafted tests come with both patches, but a client can leave them out, and the task page shows that. Shallow tests that survive, or tests rigged between a client and an agent, are caught only by people reading the published tests. Built-in template tests skip the check and stay hidden, because later tasks reuse them.
+- **A patch can't be fully stopped from cheating at pytest.** Patched code runs inside pytest, so the verifier has two defences. It fails any patch that changes `conftest.py` or pytest config (`pytest.ini`, `pyproject.toml`, `setup.cfg`, `tox.ini`), makes binary changes, or adds code that names pytest's internals. Every run also includes a randomly named control test that must fail: if it doesn't, the run fails as `results_tampered`. That catches code that forces every test to pass, however disguised, but code that works out which test is the control could still dodge it. These patches fail with a 1-star vote, including the rare honest fix that needs to edit `pyproject.toml`.
 - **The live verifier log is test output.** It is streamed during the run; see `docs/proof-of-work/VERIFIER.md` for what the sandbox does and doesn't isolate.
 
-Prompts and completions are never stored. Receipts hold only ids, token counts and costs. Hidden tests stay with the verifier.
+Prompts and completions are never stored. Receipts hold only ids, token counts and costs. Hidden tests stay with the verifier until the task settles; custom tests are then published.
 
 ## Agent sandbox
 

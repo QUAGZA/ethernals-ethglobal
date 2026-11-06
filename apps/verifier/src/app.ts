@@ -5,13 +5,16 @@ import { z } from "zod";
 import {
   ESCROW_CHAIN_ID,
   verifyReceiptIntegrity,
+  type CalibrationRequest,
   type Hex,
   type HiddenTestsBundle,
+  type RevealedTests,
   type VerifierEvent,
   type VerifierHealth,
   type VerifyJob,
   type VerifyRequest,
 } from "@ethernals/shared";
+import { calibrationIdOf, runCalibration } from "./calibrate";
 import type { PipelineDeps } from "./pipeline";
 import { runJob } from "./pipeline";
 import { MAX_PATCH_BYTES, testsHash as hashTests, validateBundle } from "./hashing";
@@ -36,6 +39,16 @@ const verifySchema = z.object({
   testCommand: z.string().max(200).optional(),
   erc8004RequestHash: z.string().regex(/^0x[0-9a-f]{64}$/).optional(),
   specialistAgentId: z.string().max(100).optional(),
+});
+
+const calibrationSchema = z.object({
+  repoUrl: z.string().max(300),
+  baseCommit: z.string().regex(/^[0-9a-f]{40}$/),
+  testsId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  testsHash: z.string().regex(/^0x[0-9a-f]{64}$/),
+  testCommand: z.string().max(200).optional(),
+  referencePatch: z.string().max(MAX_PATCH_BYTES).optional(),
+  naivePatch: z.string().max(MAX_PATCH_BYTES).optional(),
 });
 
 export function createApp(deps: AppDeps) {
@@ -98,6 +111,30 @@ export function createApp(deps: AppDeps) {
     res.json({ testsId, testsHash: hash });
   });
 
+  const calibrating = new Set<string>();
+
+  /** Runs the tests against the unfixed code and any supplied patches. A failed check runs again, since tests can be flaky. */
+  app.post("/calibrations", requireToken, (req, res) => {
+    const parsed = calibrationSchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "bad request" }); return; }
+    const body = parsed.data as CalibrationRequest;
+    const bundle = store.getTests(body.testsId);
+    if (!bundle || hashTests(bundle) !== body.testsHash) { res.status(400).json({ error: "unknown testsId" }); return; }
+    const calibrationId = calibrationIdOf(body);
+    if (!calibrating.has(calibrationId) && !store.getCalibration(calibrationId)?.report?.ok) {
+      calibrating.add(calibrationId);
+      store.putCalibration({ calibrationId, status: "queued", report: null, error: null });
+      schedule(() => runCalibration(pipeline, calibrationId, body).finally(() => calibrating.delete(calibrationId)));
+    }
+    res.status(202).json({ calibrationId });
+  });
+
+  app.get("/calibrations/:id", requireToken, (req, res) => {
+    const calibration = store.getCalibration(String(req.params.id));
+    if (!calibration) { res.status(404).json({ error: "not found" }); return; }
+    res.json(calibration);
+  });
+
   app.post("/verify", requireToken, (req, res) => {
     const parsed = verifySchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "bad request" }); return; }
@@ -131,6 +168,18 @@ export function createApp(deps: AppDeps) {
     bus.on(jobId, send);
     const hb = setInterval(() => res.write(": keep-alive\n\n"), 20_000);
     req.on("close", () => { clearInterval(hb); bus.off(jobId, send); });
+  });
+
+  /** The tests, once this job's outcome is on-chain. Token-gated: the server also holds them back while another task shares them. */
+  app.get("/jobs/:jobId/tests", requireToken, (req, res) => {
+    const job = store.getJob(String(req.params.jobId));
+    if (!job?.result) { res.status(404).json({ error: "not found" }); return; }
+    if (!job.settleTxHash) { res.status(409).json({ error: "not settled yet" }); return; }
+    const testsId = job.result.testsHash.slice(2, 26);
+    const bundle = store.getTests(testsId);
+    if (!bundle) { res.status(404).json({ error: "not found" }); return; }
+    const revealed: RevealedTests = { testsId, testsHash: job.result.testsHash, files: bundle.files };
+    res.json(revealed);
   });
 
   app.get("/results/:file", (req, res) => {

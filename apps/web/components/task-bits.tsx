@@ -2,7 +2,7 @@
 
 /** Small pieces shared by the task, duel and agent pages. */
 import { useEffect, useRef, useState } from "react";
-import type { InferenceReceipt, SpendEventView, SpendStateView, TaskStatus } from "@ethernals/shared";
+import type { CalibrationReport, InferenceReceipt, SpendEventView, SpendStateView, TaskStatus } from "@ethernals/shared";
 import Link from "next/link";
 import { neuronTo0g, timeOf } from "@/lib/format";
 import { useEvents } from "@/lib/use-events";
@@ -43,6 +43,54 @@ export function PatchDiff({ patch }: { patch: string }) {
         );
       })}
     </pre>
+  );
+}
+
+const REFERENCE_LABELS: Record<CalibrationReport["reference"], { text: string; tone: string }> = {
+  passed: { text: "tests pass", tone: "text-good" },
+  failed: { text: "tests fail", tone: "text-bad" },
+  not_provided: { text: "not provided", tone: "opacity-60" },
+};
+
+const NAIVE_LABELS: Record<CalibrationReport["naive"], { text: string; tone: string }> = {
+  rejected: { text: "tests reject it", tone: "text-good" },
+  accepted: { text: "tests accept it", tone: "text-bad" },
+  inconclusive: { text: "inconclusive", tone: "text-warn" },
+  not_provided: { text: "not provided", tone: "opacity-60" },
+};
+
+/** What the verifier found before funding. Counts only, so it is safe to show while the tests are hidden. */
+export function CalibrationSummary({ report }: { report: CalibrationReport }) {
+  const failures = report.base.realFailures;
+  const rows = [
+    { label: "Unfixed code", text: failures > 0 ? `${failures} hidden ${failures === 1 ? "test fails" : "tests fail"}` : "no hidden test fails", tone: failures > 0 ? "text-good" : "text-bad" },
+    { label: "Reference fix", ...REFERENCE_LABELS[report.reference] },
+    { label: "Naive patch", ...NAIVE_LABELS[report.naive] },
+  ];
+  return (
+    <div>
+      <dl className="m-0 grid grid-cols-3 gap-4 max-md:grid-cols-1">
+        {rows.map((row) => (
+          <div key={row.label}>
+            <dt className="eyebrow opacity-60">{row.label}</dt>
+            <dd className={`m-0 mt-1 font-medium ${row.tone}`}>{row.text}</dd>
+          </div>
+        ))}
+      </dl>
+      {report.reasons.length > 0 && (
+        <ul className="m-0 mt-3 list-none p-0">
+          {report.reasons.map((reason) => (
+            <li key={reason} className="leading-[1.5] text-bad">
+              {reason}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="m-0 mt-3 text-[11px] leading-[1.5] opacity-70">
+        These checks rule out bad tests. They can&apos;t prove the tests are good.
+        {report.isolation === "none" && " This run was not isolated in Docker."}
+      </p>
+    </div>
   );
 }
 

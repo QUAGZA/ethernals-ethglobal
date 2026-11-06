@@ -72,6 +72,8 @@ export interface TaskRow {
   spec_hash: string | null;
   tests_id: string | null;
   tests_hash: string | null;
+  /** The verifier's CalibrationReport: counts only. Set on every custom task since the check began, and on no template. */
+  calibration_json: string | null;
   bounty: string; // atomic tUSDC
   deadline: string;
   status: TaskStatus;
@@ -298,6 +300,7 @@ function migrate(d: DatabaseSync): void {
       spec_hash TEXT,
       tests_id TEXT,
       tests_hash TEXT,
+      calibration_json TEXT,
       bounty TEXT NOT NULL,
       deadline TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -400,6 +403,10 @@ function migrate(d: DatabaseSync): void {
   const agentColumns = d.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
   if (!agentColumns.some((c) => c.name === "strategy")) {
     d.exec("ALTER TABLE agents ADD COLUMN strategy TEXT NOT NULL DEFAULT 'careful'");
+  }
+  const taskColumns = d.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+  if (!taskColumns.some((c) => c.name === "calibration_json")) {
+    d.exec("ALTER TABLE tasks ADD COLUMN calibration_json TEXT");
   }
 }
 
@@ -624,6 +631,17 @@ export function listUnratedSettledTasks(): TaskRow[] {
   return getDb()
     .prepare("SELECT * FROM tasks WHERE status IN ('passed', 'failed') AND rating_submitted = 0 AND hire_id IS NOT NULL")
     .all() as unknown as TaskRow[];
+}
+/** Whether a task that could still be worked on uses these tests. A failed create never went on-chain, so it doesn't count. */
+export function isTestsInUse(testsId: string, exceptTaskId: string): boolean {
+  return Boolean(
+    getDb()
+      .prepare(
+        `SELECT 1 FROM tasks WHERE tests_id = ? AND id != ?
+         AND status NOT IN ('passed', 'failed', 'refunded') AND NOT (status = 'error' AND chain_task_id IS NULL) LIMIT 1`,
+      )
+      .get(testsId, exceptTaskId),
+  );
 }
 export function listTasksOfDuel(duelId: string): TaskRow[] {
   return getDb().prepare("SELECT * FROM tasks WHERE duel_id = ? ORDER BY rowid").all(duelId) as unknown as TaskRow[];

@@ -24,6 +24,9 @@ const MAX_LINE = 500;
 
 export const cleanLine = (l: string) => l.replace(ANSI, "").replace(/\r/g, "").slice(0, MAX_LINE);
 
+/** Overrides any `-x` in the command or repo config: the canary fails on purpose, and that must not end the run early. */
+const FULL_RUN = "--maxfail=0 -p no:cacheprovider";
+
 /** Only simple test commands are accepted: letters, digits, spaces and a few flag characters. */
 export function isSafeTestCommand(cmd: string): boolean {
   return /^[A-Za-z0-9_./=:,\- ]{1,200}$/.test(cmd);
@@ -36,7 +39,7 @@ export function dockerArgs(o: Pick<RunOptions, "image" | "repoDir" | "outDir" | 
     "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
     "-e", "PYTHONDONTWRITEBYTECODE=1",
     "-v", `${o.repoDir}:/work`, "-v", `${o.outDir}:/out`, "-w", "/work",
-    o.image, "sh", "-c", `${o.testCommand} -p no:cacheprovider --junitxml=/out/junit.xml`,
+    o.image, "sh", "-c", `${o.testCommand} ${FULL_RUN} --junitxml=/out/junit.xml`,
   ];
 }
 
@@ -47,7 +50,7 @@ export function runTests(o: RunOptions): Promise<RunOutcome> {
   const child =
     o.mode === "docker"
       ? spawn("docker", dockerArgs(o), { windowsHide: true })
-      : spawn(`${o.testCommand} -p no:cacheprovider --junitxml="${junitPath}"`, {
+      : spawn(`${o.testCommand} ${FULL_RUN} --junitxml="${junitPath}"`, {
           cwd: o.repoDir,
           shell: true,
           windowsHide: true,

@@ -28,7 +28,7 @@ export function loadDemo() {
 }
 
 /** Test/selftest stand-in for cloneRepo: builds a local git repo from demo/tasks/slugify/repo (no network, no GitHub push). */
-export async function prepareDemoRepo(repoDir: string, _req: VerifyRequest, log: (l: string) => void = () => undefined) {
+export async function prepareDemoRepo(repoDir: string, _req: unknown, log: (l: string) => void = () => undefined) {
   fs.cpSync(path.join(DEMO_DIR, "repo"), repoDir, { recursive: true });
   const run = (args: string[]) => spawnSync("git", ["-c", "core.autocrlf=false", ...args], { cwd: repoDir, encoding: "utf8" });
   run(["init", "-q"]);

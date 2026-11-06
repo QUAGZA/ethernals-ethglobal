@@ -47,8 +47,9 @@ import { getBalances } from "./hedera";
 import { createRpContext, verifyWorldProof } from "./identity";
 import { listRunViews, runView, startRun, startRunSchema, stopRun } from "./agent-sandbox";
 import { buildNameraGuard, encryptNameraKey, guardFor, spendEventView } from "./spend";
-import { connectNameraSchema, createDuelSchema, createTaskSchema, hireForTaskSchema } from "./task-schemas";
-import { clientBuyer, createDuel, createTask, hireSpecialist, loadTemplate, refundTask, tryOverspend } from "./task-service";
+import { connectNameraSchema, createDuelSchema, createTaskSchema, draftTestsSchema, hireForTaskSchema } from "./task-schemas";
+import { draftTests } from "./test-writer";
+import { clientBuyer, createDuel, createTask, hireSpecialist, loadTemplate, publishedTests, refundTask, tryOverspend } from "./task-service";
 import { capabilitiesOf, getProofView, listProofViews, runDemoProof, runSubcontract } from "./proofs";
 import { submitRating } from "./verifier";
 import { verifierHealth } from "./verifier-client";
@@ -406,6 +407,15 @@ export function createApi(): Router {
   r.post("/api/tasks", async (req, res) => {
     const person = requirePerson(req);
     res.json(taskView(await createTask(person, createTaskSchema.parse(req.body))));
+  });
+
+  r.post("/api/tasks/draft-tests", async (req, res) => {
+    const person = requirePerson(req);
+    res.json(await draftTests(person, draftTestsSchema.parse(req.body)));
+  });
+
+  r.get("/api/tasks/:id/tests.json", async (req, res) => {
+    res.json(await publishedTests(taskById(String(req.params.id))));
   });
 
   r.get("/api/tasks/:id/spec.json", (req, res) => {

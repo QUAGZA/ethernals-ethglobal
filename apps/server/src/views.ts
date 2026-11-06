@@ -12,6 +12,7 @@ import {
   sepoliaTxUrl,
   type AgentDetail,
   type AgentSummary,
+  type CalibrationReport,
   type DuelView,
   type TaskLinks,
   type TaskSpec,
@@ -42,7 +43,7 @@ import {
 } from "./db";
 import { getStats, type LedgerStats } from "./ledger";
 import { spendEventView } from "./spend";
-import { canRefund, refundEligibleAt } from "./task-service";
+import { areTestsPublic, canRefund, refundEligibleAt } from "./task-service";
 
 const statsCache = new Map<string, { stats: LedgerStats; at: number }>();
 
@@ -160,6 +161,8 @@ export function taskView(t: TaskRow): TaskDetailView {
     spec: JSON.parse(t.spec_json) as TaskSpec,
     specHash: t.spec_hash as TaskView["specHash"],
     testsHash: t.tests_hash as TaskView["testsHash"],
+    calibration: t.calibration_json ? (JSON.parse(t.calibration_json) as CalibrationReport) : null,
+    testsUrl: areTestsPublic(t) ? `/api/tasks/${t.id}/tests.json` : null,
     bounty: formatUnits6(BigInt(t.bounty)),
     deadline: t.deadline,
     status: t.status,
