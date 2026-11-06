@@ -2,21 +2,16 @@
 
 import { useApp } from "@/lib/app-context";
 
-/** App-wide banners: DEV MODE (persons without World ID) and "server not reachable". */
+/**
+ * App-wide banner for DEV MODE (persons without World ID). The "server not reachable"
+ * banner is gone on purpose; the app keeps reconnecting quietly in the background.
+ */
 export function StatusBanners() {
-  const { config, configError } = useApp();
+  const { config } = useApp();
+  if (!config?.devFakePersons) return null;
   return (
-    <>
-      {config?.devFakePersons && (
-        <div role="alert" className="bg-bad px-[2.2vw] py-2 text-center font-medium tracking-[.08em] text-white max-md:px-5">
-          DEV MODE: NOT VERIFIED — persons can be created without World ID (DEV_FAKE_PERSONS=true). Never demo like this.
-        </div>
-      )}
-      {configError && (
-        <div role="alert" className="bg-ink px-[2.2vw] py-2 text-center text-paper max-md:px-5">
-          <span className="text-yellow">●</span> {configError.message} {configError.hint ?? ""}
-        </div>
-      )}
-    </>
+    <div role="alert" className="bg-bad px-[2.2vw] py-2 text-center font-medium tracking-[.08em] text-white max-md:px-5">
+      DEV MODE: NOT VERIFIED — persons can be created without World ID (DEV_FAKE_PERSONS=true). Never demo like this.
+    </div>
   );
 }

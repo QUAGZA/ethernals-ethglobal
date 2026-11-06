@@ -68,14 +68,14 @@ function PassControls({ me }: { me: MeResponse }) {
       </p>
       <div className="mt-4 flex flex-wrap gap-3">
         <button
-          className="cursor-pointer border border-ink px-4 py-2.5 hover:bg-yellow disabled:cursor-not-allowed disabled:opacity-40"
+          className="cursor-pointer border border-ink px-4 py-2.5 hover:bg-cobalt disabled:cursor-not-allowed disabled:opacity-40"
           disabled={busy || expired}
           onClick={() => void run("expire")}
         >
           EXPIRE MY PASS
         </button>
         <button
-          className="cursor-pointer border border-ink px-4 py-2.5 hover:bg-yellow disabled:cursor-not-allowed disabled:opacity-40"
+          className="cursor-pointer border border-ink px-4 py-2.5 hover:bg-cobalt disabled:cursor-not-allowed disabled:opacity-40"
           disabled={busy || !expired}
           onClick={() => void run("restore")}
         >

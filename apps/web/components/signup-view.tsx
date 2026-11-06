@@ -148,10 +148,10 @@ export function SignupView() {
 
   return (
     <>
-      <PageHeading eyebrow="Sign up · one human, one person" title={<>Prove you&apos;re <em>one</em> person.</>}>
-        World ID proves you are a unique human without telling us who you are: we ask only for proof of
-        uniqueness, no name, age, country or document. That is what lets your rating count, once, on each agent you
-        did not build. Signing up also creates your buyer agent, with a Hedera account and an ENS name.
+      <PageHeading eyebrow="Get started · sign up or log in" title={<>Get started.</>}>
+        One flow for everyone, with World ID as the only sign-in: no password, no email. New here? Pick a handle and
+        we create your person and your buyer agent. Already registered? The same World ID signs you straight into your
+        existing account. We ask only for proof that you are one unique human, never your name or documents.
       </PageHeading>
 
       <section className="grid grid-cols-[1.1fr_1fr] gap-[5vw] px-[2.2vw] py-[3vw] max-md:grid-cols-1 max-md:px-5 max-md:py-8">
@@ -169,6 +169,17 @@ export function SignupView() {
               {notice}
             </div>
           )}
+
+          <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
+            <div className="border border-ink bg-cobalt-pale/60 px-4 py-3 leading-[1.5]">
+              <p className="eyebrow m-0 font-medium">Sign up</p>
+              <p className="m-0 mt-1 text-[11px] opacity-80">Choose a handle below. World ID creates your person and buyer agent.</p>
+            </div>
+            <div className="border border-ink px-4 py-3 leading-[1.5]">
+              <p className="eyebrow m-0 font-medium">Log in</p>
+              <p className="m-0 mt-1 text-[11px] opacity-80">Already have an account? Continue with World ID and we sign you in.</p>
+            </div>
+          </div>
 
           <form className="flex flex-col gap-6" onSubmit={startWorldId}>
             <label className="eyebrow block">
@@ -195,9 +206,9 @@ export function SignupView() {
             <button
               type="submit"
               disabled={!config || preparing || open}
-              className="cursor-pointer border border-ink bg-yellow px-5 py-[18px] text-[14px] tracking-[.08em] text-ink hover:bg-ink hover:text-yellow disabled:cursor-not-allowed disabled:opacity-40"
+              className="cursor-pointer border border-ink bg-cobalt px-5 py-[18px] text-[14px] tracking-[.08em] text-ink hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {preparing ? "PREPARING THE REQUEST…" : open ? "WAITING FOR WORLD ID…" : "VERIFY WITH WORLD ID →"}
+              {preparing ? "PREPARING THE REQUEST…" : open ? "WAITING FOR WORLD ID…" : "CONTINUE WITH WORLD ID →"}
             </button>
           </form>
 
@@ -211,8 +222,8 @@ export function SignupView() {
             </p>
           )}
 
-          <ErrorNotice error={configError && !config ? configError : null} title="Cannot sign up right now" />
-          <ErrorNotice error={error} title="Sign-up problem" />
+          <ErrorNotice error={configError && !config ? configError : null} title="Cannot get started right now" />
+          <ErrorNotice error={error} title="World ID problem" />
 
           {config?.devFakePersons && (
             <div className="border border-bad px-5 py-4">
@@ -240,7 +251,7 @@ export function SignupView() {
             </li>
             <li className="grid grid-cols-[36px_1fr]">
               <span>02</span>
-              <span>The server verifies the proof with World. If this human already has a person here, you are signed in instead: one human, one person.</span>
+              <span>The server verifies the proof with World. A new human gets a person; a returning one is logged in: one human, one person.</span>
             </li>
             <li className="grid grid-cols-[36px_1fr]">
               <span>03</span>

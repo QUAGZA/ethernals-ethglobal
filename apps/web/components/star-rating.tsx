@@ -25,7 +25,7 @@ export function StarRating({
           aria-label={`${n} star${n === 1 ? "" : "s"}`}
           disabled={disabled}
           className={`grid size-12 cursor-pointer place-items-center border text-[26px] leading-none transition-colors disabled:cursor-not-allowed ${
-            n <= shown ? "bg-yellow" : "bg-transparent hover:bg-yellow/40"
+            n <= shown ? "bg-cobalt" : "bg-transparent hover:bg-cobalt/40"
           }`}
           onMouseEnter={() => setHover(n)}
           onFocus={() => setHover(n)}

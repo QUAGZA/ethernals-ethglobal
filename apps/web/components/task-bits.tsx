@@ -9,14 +9,14 @@ import { useEvents } from "@/lib/use-events";
 import { ExtLink } from "./ext-link";
 
 export const PRIMARY_BUTTON =
-  "cursor-pointer border border-ink bg-yellow px-5 py-[15px] text-[13px] tracking-[.08em] text-ink hover:bg-ink hover:text-yellow disabled:cursor-not-allowed disabled:opacity-40";
-export const SECONDARY_BUTTON = "cursor-pointer border border-ink px-4 py-2.5 hover:bg-yellow disabled:cursor-not-allowed disabled:opacity-40";
+  "cursor-pointer border border-ink bg-cobalt px-5 py-[15px] text-[13px] tracking-[.08em] text-ink hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-40";
+export const SECONDARY_BUTTON = "cursor-pointer border border-ink px-4 py-2.5 hover:bg-cobalt disabled:cursor-not-allowed disabled:opacity-40";
 export const FIELD = "mt-1 block w-full border-b border-ink bg-transparent py-3 text-[13px] normal-case tracking-normal outline-none focus:bg-white/60";
 
 const STATUS_STYLES: Record<TaskStatus, string> = {
   creating: "border-current opacity-60",
-  open: "border-ink bg-yellow text-ink",
-  accepted: "border-ink bg-yellow text-ink",
+  open: "border-ink bg-cobalt text-ink",
+  accepted: "border-ink bg-cobalt text-ink",
   submitted: "border-warn text-warn",
   verifying: "border-warn text-warn",
   passed: "border-good bg-good text-white",
@@ -37,7 +37,7 @@ export function PatchDiff({ patch }: { patch: string }) {
         const added = line.startsWith("+") && !line.startsWith("+++");
         const removed = line.startsWith("-") && !line.startsWith("---");
         return (
-          <span key={index} className={`block ${added ? "text-[#6ee7a0]" : removed ? "text-[#ff8a8a]" : line.startsWith("@@") ? "text-yellow" : ""}`}>
+          <span key={index} className={`block ${added ? "text-[#6ee7a0]" : removed ? "text-[#ff8a8a]" : line.startsWith("@@") ? "text-cobalt" : ""}`}>
             {line || " "}
           </span>
         );
@@ -112,7 +112,7 @@ export function VerifierConsole({ lines, status, tall = false, finished = false 
           {line}
         </div>
       ))}
-      {lines.length > 0 && status && <p className="m-0 mt-2 text-yellow">{status}</p>}
+      {lines.length > 0 && status && <p className="m-0 mt-2 text-cobalt">{status}</p>}
       <div ref={end} />
     </div>
   );

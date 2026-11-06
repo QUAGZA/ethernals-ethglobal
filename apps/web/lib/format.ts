@@ -24,6 +24,16 @@ export function timeOf(iso: string | Date | null | undefined): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-09-27T…" -> "27 Sep 2026", the same on the server and in every browser (no locale, no hydration mismatch). */
+export function dateOf(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
 export function dateTimeOf(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);

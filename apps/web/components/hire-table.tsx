@@ -57,7 +57,7 @@ export function HireTable({
         </thead>
         <tbody>
           {hires.map((h) => (
-            <tr key={h.id} className={`border-b border-line align-baseline ${h.id === highlightId ? "bg-yellow/40" : ""}`}>
+            <tr key={h.id} className={`border-b border-line align-baseline ${h.id === highlightId ? "bg-cobalt/40" : ""}`}>
               <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">{dateTimeOf(h.createdAt)}</td>
               {showAgent && (
                 <td className="px-3 py-2.5">

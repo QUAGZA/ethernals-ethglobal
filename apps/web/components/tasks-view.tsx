@@ -22,7 +22,7 @@ export function TasksView() {
         eyebrow="Tasks · proof-of-work hiring"
         title={<>Paid only if the <em>tests</em> pass.</>}
         aside={
-          <Link href="/tasks/new" className="inline-block border border-ink bg-yellow px-5 py-[15px] whitespace-nowrap text-ink hover:bg-ink hover:text-yellow">
+          <Link href="/tasks/new" className="inline-block border border-ink bg-cobalt px-5 py-[15px] whitespace-nowrap text-ink hover:bg-ink hover:text-white">
             POST A TASK →
           </Link>
         }

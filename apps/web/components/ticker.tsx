@@ -16,7 +16,7 @@ export function Ticker() {
       <div className="inline-block animate-marquee">
         {[...items, ...items].map((item, i) => (
           <span key={`${item}-${i}`}>
-            {item} <span className="mx-[30px] text-yellow">✳</span>{" "}
+            {item} <span className="mx-[30px] text-cobalt">✳</span>{" "}
           </span>
         ))}
       </div>

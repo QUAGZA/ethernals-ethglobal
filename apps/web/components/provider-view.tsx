@@ -8,7 +8,7 @@ import { api, toApiError, type ApiRequestError } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
 import { useDebounced, useLoad } from "@/lib/hooks";
 import { eventString, useEvents } from "@/lib/use-events";
-import { AgentGrid } from "./agent-card";
+import { AgentList } from "./agent-card";
 import { EmptyNote, ErrorNotice } from "./error-notice";
 import { ExtLink } from "./ext-link";
 import { HireTable } from "./hire-table";
@@ -90,10 +90,14 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
   return (
     <section className="border">
       <header className="eyebrow flex items-center justify-between border-b px-5 py-3.5">
-        <span className="font-medium">Create a seller agent</span>
+        <span className="font-medium">Provide your agent</span>
         <span className="normal-case tracking-normal opacity-70">takes 20–60 s</span>
       </header>
       <form className="flex flex-col gap-5 px-5 py-5" onSubmit={submit}>
+        <p className="m-0 text-[12px] leading-[1.6] opacity-80">
+          Name it, pick its specialization and set a base price. Its proof trail starts the moment it is live: an ENS name on
+          Sepolia, a Hedera account, verified work, ratings from distinct people and a receipt for every inference.
+        </p>
         <label className="eyebrow block">
           Label (its ENS name)
           <input
@@ -112,7 +116,7 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
         </label>
         <div className="grid grid-cols-2 gap-5">
           <label className="eyebrow block">
-            Task type
+            Specialization
             <select
               className={`${fieldClass} cursor-pointer`}
               value={taskType}
@@ -151,9 +155,9 @@ function CreateAgentForm({ onCreated }: { onCreated: (agent: AgentSummary) => vo
         <button
           type="submit"
           disabled={busy}
-          className="cursor-pointer border border-ink bg-yellow px-5 py-[15px] text-[13px] tracking-[.08em] text-ink hover:bg-ink hover:text-yellow disabled:cursor-not-allowed disabled:opacity-40"
+          className="cursor-pointer border border-ink bg-cobalt px-5 py-[15px] text-[13px] tracking-[.08em] text-ink hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {busy ? "CREATING…" : "CREATE AGENT →"}
+          {busy ? "PUTTING IT LIVE…" : "PROVIDE THIS AGENT →"}
         </button>
         {since !== null && <ProgressNote startedAt={since} steps={CREATE_STEPS} live={live} />}
         {(since !== null || spinUp.steps.length > 0) && <SpinUpChecklist steps={spinUp.steps} codeFix={taskType === "code-fix"} />}
@@ -234,7 +238,7 @@ function ProviderDashboard({ me }: { me: MeResponse }) {
           {mine.length === 0 ? (
             <EmptyNote>You have no agents yet. Create one on the left.</EmptyNote>
           ) : (
-            <AgentGrid agents={mine} />
+            <AgentList agents={mine} showOwner={false} />
           )}
         </div>
       </section>
@@ -261,13 +265,39 @@ function ProviderDashboard({ me }: { me: MeResponse }) {
   );
 }
 
+const TRAIL = [
+  { step: "ENS", body: "Your agent is a subname. Its score, price and endpoint live in text records anyone can read." },
+  { step: "Hedera", body: "It gets its own account. Every x402 payment to it settles there, with a HashScan receipt." },
+  { step: "Work", body: "Tasks with hidden tests run in the sandbox; the escrow pays only when they pass." },
+  { step: "Rating", body: "One vote per verified person per agent. Your own hires settle but never count." },
+  { step: "Receipts", body: "Each inference leaves a receipt, so the work behind every score can be audited." },
+];
+
+function ProofTrail() {
+  return (
+    <section className="border-b border-ink px-[2.2vw] max-md:px-5" aria-label="How your proof is built">
+      <ol className="m-0 grid list-none grid-cols-5 divide-x divide-line p-0 max-md:grid-cols-1 max-md:divide-x-0 max-md:divide-y">
+        {TRAIL.map((item, i) => (
+          <li key={item.step} className="py-5 pr-5 pl-5 first:pl-0 max-md:px-0">
+            <span className="eyebrow block opacity-60">0{i + 1}</span>
+            <h3 className="m-0 mt-2 text-[22px] leading-none">{item.step}</h3>
+            <p className="m-0 mt-2 text-[11px] leading-[1.5] opacity-80">{item.body}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 export function ProviderView() {
   return (
     <>
-      <PageHeading eyebrow="Provide · run agents, earn a record" title={<>Earn a record you <em>can&apos;t</em> fake.</>}>
-        Create a seller agent with its own ENS name and Hedera account. Its score and price move only when
-        different verified people pay for it and rate it.
+      <PageHeading eyebrow="Provide · list a specialist, earn a record" title={<>Put your agent <em>to work.</em></>}>
+        Tell us what your agent is good at and we set up its proof: an ENS name that holds its score and price, a
+        Hedera account that gets paid over x402, work verified in the sandbox, ratings that count only from different
+        verified people, and an inference receipt for every answer.
       </PageHeading>
+      <ProofTrail />
       <SignInGate next="/provider" reason="Sign in to create agents. Each agent belongs to exactly one verified person.">
         {(_person, me) => <ProviderDashboard me={me} />}
       </SignInGate>
