@@ -10,7 +10,9 @@ import {
   parseUnits6,
   type CreateDuelRequest,
   type CreateTaskRequest,
+  type CalibrationReport,
   type HiddenTestsBundle,
+  type PublishedTests,
   type SpendEventView,
   type SpendGuard,
   type TaskSpec,
@@ -25,6 +27,7 @@ import {
   getTask,
   insertDuel,
   insertTask,
+  isTestsInUse,
   listAgentsOfPerson,
   updateTask,
   type AgentRow,
@@ -36,7 +39,7 @@ import { AppError, badRequest, conflict, forbidden, notFound } from "./errors";
 import { emit, log } from "./events";
 import { ensureTusdc, fundTask, fundingCalls, getTaskOnChain, refundOnChain } from "./escrow";
 import { guardFor, recordSpend, spendEventView } from "./spend";
-import { uploadHiddenTests } from "./verifier-client";
+import { calibrateTests, getRevealedTests, uploadHiddenTests } from "./verifier-client";
 
 export const REFUND_GRACE_MS = 30 * 60 * 1000;
 const DUEL_DEADLINE_MINUTES = 30;
@@ -80,9 +83,11 @@ export async function loadTemplate(name: "slugify", tasksDir = path.join(ROOT_DI
   } catch {
     throw new AppError(503, `The "${name}" demo task is missing.`, "Dev A adds demo/tasks/slugify. Merge main.");
   }
-  const spec = JSON.parse(raw) as Template["spec"];
+  const { issueFile, ...fields } = JSON.parse(raw) as Template["spec"] & { issueFile?: string };
+  const issue = issueFile ? (await fs.readFile(path.join(dir, issueFile), "utf8")).trim() : fields.issue;
+  const spec: Template["spec"] = { title: fields.title, repoUrl: fields.repoUrl, baseCommit: fields.baseCommit, issue, testCommand: fields.testCommand };
   if (!/^[0-9a-f]{40}$/.test(spec.baseCommit ?? "") || !spec.repoUrl) {
-    throw new AppError(503, `The "${name}" demo task has no repo yet.`, "Fill repoUrl and baseCommit in demo/tasks/slugify/task.json.");
+    throw new AppError(503, `The "${name}" demo task has no repo yet.`, "Push demo/tasks/slugify/repo to GitHub, then fill repoUrl and baseCommit in demo/tasks/slugify/task.json.");
   }
   return { spec, hiddenTests: { files: await filesUnder(path.join(dir, "hidden_tests"), "") } };
 }
@@ -135,6 +140,23 @@ export async function createTask(person: PersonRow, request: CreateTaskRequest, 
     throw new AppError(502, "The verifier committed to a different tests hash than the tests we sent.");
   }
 
+  // A pass pays the bounty and writes a 5-star rating, so tests that can't tell a fix from no fix are stopped before any
+  // money moves. Templates are skipped: their tests are fixed, and the verifier's suite checks them the same way.
+  const calibration = template
+    ? null
+    : await calibrateTests({
+        repoUrl: spec.repoUrl,
+        baseCommit: spec.baseCommit,
+        testsId: uploaded.testsId,
+        testsHash: uploaded.testsHash,
+        testCommand: spec.testCommand,
+        referencePatch: request.checks?.referencePatch || undefined,
+        naivePatch: request.checks?.naivePatch || undefined,
+      });
+  if (calibration && !calibration.ok) {
+    throw new AppError(422, `These tests can't back a bounty. ${calibration.reasons.join(" ")}`, "Nothing was funded. Change the tests or the patches and try again.", { calibration });
+  }
+
   const id = randomId("task");
   const specHash = specHashOf(spec);
   const bountyUnits = parseUnits6(request.bounty);
@@ -151,6 +173,7 @@ export async function createTask(person: PersonRow, request: CreateTaskRequest, 
     spec_hash: specHash,
     tests_id: uploaded.testsId,
     tests_hash: uploaded.testsHash,
+    calibration_json: calibration ? JSON.stringify(calibration) : null,
     bounty: bountyUnits.toString(),
     deadline: deadline.toISOString(),
     status: "creating",
@@ -231,6 +254,28 @@ export async function hireSpecialist(person: PersonRow, taskId: string, speciali
   } finally {
     hiring.delete(taskId);
   }
+}
+
+// ---------------------------------------------------------------- published tests
+
+/**
+ * Custom tests go public once the outcome is on-chain, so anyone can see what earned a rating. Three exceptions stay hidden:
+ * templates, whose tests are reused by later tasks; tasks posted before this promise existed (they have no calibration);
+ * and tests another live task still shares.
+ */
+export function areTestsPublic(task: TaskRow): boolean {
+  if (task.status !== "passed" && task.status !== "failed") return false;
+  if (!task.calibration_json || !task.tests_id || !task.verify_job_id) return false;
+  return !isTestsInUse(task.tests_id, task.id);
+}
+
+export async function publishedTests(task: TaskRow): Promise<PublishedTests> {
+  if (!areTestsPublic(task)) throw conflict("These tests are hidden.", "Custom tests are published after the task settles.");
+  const { files, testsHash } = await getRevealedTests(task.verify_job_id!);
+  if (testsHash !== task.tests_hash || testsHashOf({ files }) !== task.tests_hash) {
+    throw new AppError(502, "The verifier returned tests that do not match the on-chain hash.");
+  }
+  return { testsHash, files, calibration: JSON.parse(task.calibration_json!) as CalibrationReport };
 }
 
 // ---------------------------------------------------------------- refund

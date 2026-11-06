@@ -21,7 +21,7 @@ import {
   type MandateRow,
 } from "./db";
 import { emit, log } from "./events";
-import { summarize, translate } from "./llm";
+import { generate, summarize, translate } from "./llm";
 import { quoteUnits } from "./payments";
 import { withWorkspace } from "./sandbox";
 import { codeFixRefusal, runCodeFix } from "./task-runtime";
@@ -32,8 +32,8 @@ export const taskBodySchema = z.object({
   translateTo: z.enum(["hi", "mr"]).nullish(),
   buyerAgent: z.string().min(3),
   consent: z
-    .object({ forward: z.boolean().default(false), subBudget: z.string().default("0") })
-    .default({ forward: false, subBudget: "0" }),
+    .object({ forward: z.boolean().default(false), subBudget: z.string().default("0"), maxAssistants: z.number().int().min(0).max(3).default(0) })
+    .default({ forward: false, subBudget: "0", maxAssistants: 0 }),
   parentHireId: z.string().nullish(),
   arena: z.boolean().optional(),
   /** Code-fix agents work on a posted task instead of input text. */
@@ -129,14 +129,14 @@ export async function handleSellerTask(req: Request, res: Response): Promise<voi
   }
 
   try {
-    const { result, subHire } = await withWorkspace(hireId, async (dir) => {
+    const { result, subHire, assistants } = await withWorkspace(hireId, async (dir) => {
       // The workspace is the only place this hire's data touches disk, and it is deleted afterwards.
       await fs.writeFile(path.join(dir, "input.txt"), body.input, "utf8");
       return runTask(seller, body, hireId, mandate);
     });
     updateHire(hireId, { output_hash: sha256Hex(result) });
     emit("hire.delivered", { hireId, agentEnsName: seller.ens_name, message: `${seller.ens_name} delivered for ${buyer.ens_name}` });
-    res.json({ hireId, result, quotedPrice: formatUnits6(quoted), subHire });
+    res.json({ hireId, result, quotedPrice: formatUnits6(quoted), subHire, assistants });
   } catch (err) {
     updateHire(hireId, { status: "failed" });
     log.error(`task failed for ${seller.ens_name}`, err);
@@ -149,7 +149,20 @@ async function runTask(
   body: TaskBody,
   hireId: string,
   mandate: MandateRow,
-): Promise<{ result: string; subHire: SubHireOutcome | null }> {
+): Promise<{ result: string; subHire: SubHireOutcome | null; assistants?: SubHireOutcome[] }> {
+  if (seller.task_type === "image-gen" || seller.task_type === "video-gen") {
+    return { result: await generate(body.input, seller, seller.task_type), subHire: null };
+  }
+  if (body.consent.maxAssistants > 0) {
+    // Imported lazily to avoid a cycle (assistants -> buyer -> agent-runtime).
+    const { isTextAgent, runWithAssistants } = await import("./assistants");
+    if (isTextAgent(seller)) {
+      const run = await runWithAssistants({ seller, hireId, mandateId: mandate.id, input: body.input, maxAssistants: body.consent.maxAssistants });
+      const own = run.result ?? (await ownWork(seller, body));
+      const result = run.result ? own : [own, ...run.notes].join("\n\n---\n");
+      return { result, subHire: null, assistants: run.assistants };
+    }
+  }
   if (seller.task_type === "translate") {
     return { result: await translate(body.input, body.translateTo ?? "hi", seller), subHire: null };
   }
@@ -162,6 +175,10 @@ async function runTask(
     return { result: `${summary}\n\n---\n${outcome.result}`, subHire: stripResult(outcome) };
   }
   return { result: summary, subHire: stripResult(outcome) };
+}
+
+function ownWork(seller: AgentRow, body: TaskBody): Promise<string> {
+  return seller.task_type === "translate" ? translate(body.input, body.translateTo ?? "hi", seller) : summarize(body.input, seller);
 }
 
 function stripResult(o: SubHireOutcome & { result?: string }): SubHireOutcome {

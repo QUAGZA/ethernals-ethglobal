@@ -1,7 +1,7 @@
 /**
  * Person hashes, provider keys, key encryption at rest and session tokens.
  */
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { config } from "./config";
 
 /** Per-agent person hash: equal only for the same person on the same agent (PRD §6.1). */
@@ -70,4 +70,24 @@ export function readSessionToken(token: string | undefined): string | null {
 
 export function generateSecret(): string {
   return randomBytes(32).toString("base64url");
+}
+
+const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+
+/**
+ * The agent's Hedera key, derived from the platform root secret and its ENS name: nothing per-agent has to be stored,
+ * and any host with the same root secret can operate the agent. (The root secret is KEYSTORE_SECRET.)
+ */
+export function deriveAgentKeyHex(ensName: string): `0x${string}` {
+  for (let i = 0; i < 8; i++) {
+    const raw = Buffer.from(hkdfSync("sha256", config.secrets.keystore(), "ethernals-agent-key-v1", `${ensName.toLowerCase()}|${i}`, 32));
+    const n = BigInt(`0x${raw.toString("hex")}`);
+    if (n > 0n && n < SECP256K1_N) return `0x${raw.toString("hex")}`;
+  }
+  throw new Error("Could not derive a valid agent key.");
+}
+
+/** HMAC of a World ID nullifier: proves "same human" on-chain without publishing the nullifier. */
+export function nullifierHash(nullifier: string): string {
+  return createHmac("sha256", config.secrets.personHash()).update(`nullifier|${nullifier}`).digest("hex");
 }

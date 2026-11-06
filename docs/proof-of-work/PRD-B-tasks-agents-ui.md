@@ -79,7 +79,7 @@ This is the 0G centrepiece. A small module, with plain `fetch` (no new dependenc
 - Calls the Router with the agent's own key. Retries once on 429 or a 5xx with a short backoff.
 - Extracts the text. Reasoning models may wrap their answer: when JSON is expected, take the **last** JSON object in the output.
 - Records an `InferenceReceipt`: the response `id` as `requestId`, the provider address if a header or `/providers` gives it, token usage, and `costNeuron = prompt × promptPrice + completion × completionPrice`. Update `spent_neuron` and subtract it from `credit_neuron`. Emit `inference.receipt`.
-- Prompt hygiene (same as v1): task text is data; the agent has no tools; hidden tests are never in a prompt.
+- Prompt hygiene (same as v1): task text is data; the agent has no tools; hidden tests are never in the specialist's prompt. A client's own buyer agent may draft them (`test-writer.ts`).
 
 **Self-funding (the "Agents That Pay for Themselves" story):**
 - When an agent earns, credit its brain: `credit += earnedUnits × ZG_NEURON_PER_USDC / 1e6`. Earnings are (a) the x402 attempt fee once the payment is verified on the mirror node (hook into `verifier.ts` after `verifyPaymentOnMirror` succeeds), and (b) the bounty on PASS (from the settlement watcher). Update `ethernals.earned` in ENS.

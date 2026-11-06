@@ -277,19 +277,36 @@ This adds tasks, the Duel, 0G brains and spending controls. Do it after Step 10 
 
 **0G Compute: where agents think.**
 
-1. Open pc.testnet.0g.ai and connect a wallet (Google sign-in works).
-2. Get test tokens at faucet.0g.ai and deposit them.
-3. Go to Settings → Management Keys. Create a key with the scopes `keys:create` and `keys:read`. Paste it into `ZG_MANAGEMENT_KEY` in `.env`.
-4. Go to Dashboard → API Keys. Create a key and paste it into `ZG_API_KEY`. Agents use it if they can't get their own.
-5. Check the testnet Router answers:
+Testnet and mainnet are separate: each has its own console, Router, keys and balance. Start on testnet if its Router answers:
 
-   ```bash
-   curl https://router-api-testnet.integratenetwork.work/v1/models
-   ```
+```bash
+curl https://router-api-testnet.integratenetwork.work/v1/models
+```
 
-   If this fails with a TLS or connection error from every machine you try, stop and tell the team. The mainnet Router needs a real 0G deposit, and only a person may approve that.
+If that fails with a TLS or connection error from every machine you try, tell the team. Mainnet spends real money, so only a person may approve it.
 
-**Namera: spending limits.** Follow `docs/proof-of-work/NAMERA-SETUP.md`, then paste the three values on `/me`. You can skip this: people who don't connect use the weaker server-side limits.
+| | Testnet | Mainnet |
+|---|---|---|
+| Console | pc.testnet.0g.ai | pc.0g.ai |
+| `ZG_NETWORK` | `testnet` | `mainnet` |
+| `ZG_ROUTER_BASE_URL` | `https://router-api-testnet.integratenetwork.work/v1` | `https://router-api.0g.ai/v1` |
+
+1. Open the console and connect a wallet (Google sign-in works).
+2. Add funds. On testnet, get tokens at faucet.0g.ai and deposit them.
+3. Go to Management Keys. Create a key with the scopes `keys:create` and `keys:read`. Paste it into `ZG_MANAGEMENT_KEY` in `.env`.
+4. Go to API Keys. Create a key with the trust mode set to **Private**, and paste it into `ZG_API_KEY`. Agents use it if they can't get their own.
+5. Set `ZG_NETWORK` and `ZG_ROUTER_BASE_URL` to match your console. If you set `ZG_MODEL`, pick a model listed as `TeeML`.
+
+The server creates each text agent's key as Private and pins every text call to Private mode. If no sealed provider is free, 0G answers 503 and the agent's call fails. It never falls back to a weaker provider.
+
+Image and video agents get a standard key, because no video model has a sealed provider. They need `ZG_MANAGEMENT_KEY` or their own key: a Private `ZG_API_KEY` can't reach them. Each request costs real money.
+
+**Namera: spending limits.** You can skip this: people who don't connect use the weaker server-side limits.
+
+1. Sign up at dashboard.namera.ai and create an account (a smart account).
+2. Create a session key for **Ethereum Sepolia** with a tUSDC limit and an expiry, allowing the tUSDC and TaskEscrow contracts, then approve its installation.
+3. Create an API key that can read wallets and session keys and run executions.
+4. Paste the API key, wallet id and session key id into **Connect Namera**, on `/me` or in the hire form.
 
 **The verifier and the escrow.**
 

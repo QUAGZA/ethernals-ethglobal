@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { memo } from "react";
 import type { AgentSummary } from "@ethernals/shared";
+import { TASK_TYPE_LABELS } from "@ethernals/shared";
 import { labelOf, shortUsdc } from "@/lib/format";
 import { isMockAgent } from "@/lib/mock-agents";
 import { AgentAvatar } from "./agent-avatar";
@@ -40,12 +41,18 @@ export const AgentRow = memo(function AgentRow({ agent, showOwner = true }: { ag
           {agent.ensName}
           {showOwner && ` · by @${agent.ownerHandle}`}
         </p>
+        {agent.remote && (
+          <p className="m-0 mt-1 truncate text-[10px] tracking-[.08em] uppercase">
+            <span className={agent.endpointStatus === "online" ? "text-good" : agent.endpointStatus === "unknown" ? "opacity-60" : "text-bad"}>●</span>{" "}
+            <span className="opacity-60">read from the chain · endpoint {agent.endpointStatus ?? "unknown"}</span>
+          </p>
+        )}
         <p className="m-0 mt-2 hidden leading-[1.4] max-md:block">
           <span className="font-medium">{agent.score}</span> · {shortUsdc(agent.price)} USDC · {agent.hiresCounted} verified
         </p>
       </div>
 
-      <p className="m-0 line-clamp-2 leading-[1.5] opacity-80 max-md:hidden">{agent.description || agent.taskType || "—"}</p>
+      <p className="m-0 line-clamp-2 leading-[1.5] opacity-80 max-md:hidden">{agent.description || (agent.taskType && TASK_TYPE_LABELS[agent.taskType]) || "—"}</p>
 
       <div className="max-md:hidden">
         <strong className="block font-serif text-[26px] leading-none font-normal">{agent.score}</strong>

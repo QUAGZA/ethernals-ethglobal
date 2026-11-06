@@ -25,7 +25,7 @@ export function Footer() {
         aria-label={appName}
       >
         <span>{stem}</span>
-        <BrandMark standing className="mb-[0.02em] ml-[0.08em] h-[0.78em] w-[0.5em] [--mark-w:0.78em]" />
+        <BrandMark standing className="mb-[0.06em] ml-[0.08em] h-[0.78em] w-[0.5em] [--mark-w:0.78em]" />
         <span className="ml-[0.12em] self-start font-mono text-[max(14px,1.1vw)] leading-none" aria-hidden>
           ®
         </span>

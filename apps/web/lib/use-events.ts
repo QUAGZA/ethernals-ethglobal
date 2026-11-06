@@ -37,6 +37,8 @@ const EVENT_TYPES: EventType[] = [
   "inference.receipt",
   "spend.allowed",
   "spend.blocked",
+  "sandbox.step",
+  "sandbox.done",
   "info",
 ];
 

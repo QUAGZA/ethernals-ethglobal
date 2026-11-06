@@ -3,7 +3,9 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback } from "react";
+import { TASK_TYPE_LABELS } from "@ethernals/shared";
 import { api } from "@/lib/api";
+import { useApp } from "@/lib/app-context";
 import { dateOf } from "@/lib/format";
 import { useDebounced, useInterval, useLoad } from "@/lib/hooks";
 import { mockDetail, type MockAgent } from "@/lib/mock-agents";
@@ -22,6 +24,9 @@ const HirePanel = dynamic(() => import("./hire-panel").then((m) => m.HirePanel),
 });
 const BrainPanel = dynamic(() => import("./brain-panel").then((m) => m.BrainPanel), {
   loading: () => <p className="eyebrow m-0 py-6 opacity-60">Loading the brain panel…</p>,
+});
+const AgentConfigPanel = dynamic(() => import("./agent-config-panel").then((m) => m.AgentConfigPanel), {
+  loading: () => <p className="eyebrow m-0 py-6 opacity-60">Loading agent settings…</p>,
 });
 
 function SectionHead({ title, note }: { title: React.ReactNode; note: string }) {
@@ -42,7 +47,7 @@ function MockAgentPage({ agent }: { agent: MockAgent & { siblingAgents: MockAgen
         <Panel title="Specialty and provider" right={<span className="opacity-60">preview</span>}>
           <div className="grid grid-cols-2 gap-5 max-md:grid-cols-1">
             <Stat label="Specialty" value={agent.specialty} />
-            <Stat label="Task type" value={agent.taskType} />
+            <Stat label="Task type" value={agent.taskType ? TASK_TYPE_LABELS[agent.taskType] : "—"} />
             <Stat label="Provider" value={`@${agent.ownerHandle}`} />
             <Stat label="Provider key" value={agent.providerKeyShort} />
             <Stat label="Base price" value={`${agent.basePrice} USDC`} />
@@ -117,6 +122,9 @@ export function AgentView({ label }: { label: string }) {
   const loader = useCallback(() => api.agent(label), [label]);
   const detail = useLoad(loader, label && !mock ? `agent:${label}` : null);
   const agent = detail.data;
+  // Only the person who created a seller agent sees its settings.
+  const { me } = useApp();
+  const isOwner = Boolean(agent && me?.person && me.person.handle === agent.ownerHandle && agent.kind === "seller");
 
   const refresh = useDebounced(() => void detail.reload(), 600);
   useEvents(
@@ -164,9 +172,25 @@ export function AgentView({ label }: { label: string }) {
         <LedgerPanel agent={agent} />
       </section>
 
-      <section className="px-[2.2vw] pt-[18px] max-md:px-5">
-        <BrainPanel agent={agent} />
-      </section>
+      {agent.remote ? (
+        <section className="px-[2.2vw] pt-[18px] max-md:px-5">
+          <p className="m-0 border px-5 py-4 text-[12px] leading-[1.6]">
+            This agent was found on-chain (ENS + HireLedger) and runs on another server. Its endpoint is currently{" "}
+            <b>{agent.endpointStatus ?? "unknown"}</b>
+            {agent.endpointStatus === "online" ? "." : ", so a hire may fail."} Its score, price and votes are read from the ledger.
+          </p>
+        </section>
+      ) : (
+        <section className="px-[2.2vw] pt-[18px] max-md:px-5">
+          <BrainPanel agent={agent} />
+        </section>
+      )}
+
+      {isOwner && (
+        <section className="px-[2.2vw] pt-[18px] max-md:px-5">
+          <AgentConfigPanel label={agent.label} taskType={agent.taskType} />
+        </section>
+      )}
 
       <section className="px-[2.2vw] pt-[18px] max-md:px-5" id="hire">
         <HirePanel key={agent.key} agent={agent} reloadAgent={detail.reload} />

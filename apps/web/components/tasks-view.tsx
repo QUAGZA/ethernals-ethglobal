@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback } from "react";
+import { sepoliaTxUrl } from "@ethernals/shared";
 import { api } from "@/lib/api";
 import { dateTimeOf, usdc2 } from "@/lib/format";
 import { useDebounced, useLoad } from "@/lib/hooks";
@@ -13,6 +14,7 @@ import { StatusChip } from "./task-bits";
 export function TasksView() {
   const loader = useCallback(() => api.tasks(), []);
   const tasks = useLoad(loader, "tasks");
+  const onChain = useLoad(useCallback(() => api.chainTasks(), []), "chain-tasks");
   const refresh = useDebounced(() => void tasks.reload(), 800);
   useEvents(refresh, ["task.created", "task.accepted", "task.submitted", "task.settled", "task.refunded", "verify.status"]);
 
@@ -64,6 +66,32 @@ export function TasksView() {
                     <td className="py-3 whitespace-nowrap opacity-70">{dateTimeOf(task.createdAt)}</td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {onChain.data && onChain.data.length > 0 && (
+          <div className="mt-12">
+            <p className="eyebrow mb-3 opacity-60">TASKS FOUND ON-CHAIN · read-only, from the TaskEscrow contract</p>
+            <table className="w-full min-w-[560px] border-collapse text-left">
+              <tbody>
+                {onChain.data.map((t) => {
+                  const last = t.txs.refunded ?? t.txs.settled ?? t.txs.submitted ?? t.txs.accepted ?? t.txs.created;
+                  return (
+                    <tr key={t.chainTaskId} className="border-b border-line">
+                      <td className="py-3 pr-4">#{t.chainTaskId}</td>
+                      <td className="py-3 pr-4">{t.status}</td>
+                      <td className="py-3 pr-4 whitespace-nowrap">{t.bounty} tUSDC</td>
+                      <td className="py-3">
+                        {last && (
+                          <a className="underline" href={sepoliaTxUrl(last)} target="_blank" rel="noreferrer">
+                            Etherscan ↗
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

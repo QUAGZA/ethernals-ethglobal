@@ -7,6 +7,8 @@ const serverUrl = (process.env.SERVER_URL ?? "http://127.0.0.1:4000").replace(/\
 
 const config: NextConfig = {
   transpilePackages: ["@ethernals/shared"],
+  // Lets the dev server (HMR) be opened through a Cloudflare quick tunnel.
+  allowedDevOrigins: ["*.trycloudflare.com"],
   // Next's gzip would buffer the proxied Server-Sent Events stream (/api/events).
   compress: false,
   experimental: {

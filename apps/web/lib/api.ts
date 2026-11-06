@@ -3,32 +3,45 @@
  * rewrites /api/* to the server, and the session is an HTTP-only cookie.
  */
 import type {
+  ChainTask,
   AgentDetail,
   AgentSummary,
   ApiError,
   ArenaRunRequest,
   ArenaState,
+  AddAgentToolRequest,
   AgentBrainView,
+  AgentConfigView,
+  UpdateAgentConfigRequest,
   ConnectNameraRequest,
   CreateAgentRequest,
   CreateDuelRequest,
   CreateTaskRequest,
+  DraftTestsRequest,
+  DraftTestsResponse,
   DevLoginRequest,
   HireRequest,
   HireResponse,
   HireView,
   InferenceReceipt,
   MeResponse,
+  ProofView,
   PublicConfig,
   RateResponse,
   RpContext,
   SpendPolicyView,
   SpendStateView,
   StatsResponse,
+  PublishedTests,
   TaskSpec,
   TaskView,
   TryOverspendResponse,
   VerifierHealth,
+  RunProofRequest,
+  SandboxRunView,
+  StartSandboxRunRequest,
+  SubcontractRequest,
+  SubcontractResponse,
   WorldVerifyRequest,
 } from "@ethernals/shared";
 
@@ -71,7 +84,7 @@ export function toApiError(err: unknown): ApiRequestError {
   return new ApiRequestError(0, String(err));
 }
 
-type RequestOptions = { method?: "GET" | "POST" | "DELETE"; body?: unknown; signal?: AbortSignal };
+type RequestOptions = { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: unknown; signal?: AbortSignal };
 
 async function request<T>(path: string, { method = "GET", body, signal }: RequestOptions = {}): Promise<T> {
   let res: Response;
@@ -116,6 +129,8 @@ async function request<T>(path: string, { method = "GET", body, signal }: Reques
 }
 
 const get = <T>(path: string, signal?: AbortSignal) => request<T>(path, { signal });
+const put = <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: body ?? {} });
+const del = <T>(path: string) => request<T>(path, { method: "DELETE" });
 const post = <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body ?? {} });
 
 export const api = {
@@ -135,6 +150,12 @@ export const api = {
   agent: (label: string) => get<AgentDetailPlus>(`/api/agents/${encodeURIComponent(label)}`),
   agentBrain: (label: string) => get<AgentBrainView>(`/api/agents/${encodeURIComponent(label)}/brain`),
   agentInference: (label: string) => get<InferenceReceipt[]>(`/api/agents/${encodeURIComponent(label)}/inference`),
+  agentConfig: (label: string) => get<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/config`),
+  updateAgentConfig: (label: string, body: UpdateAgentConfigRequest) => put<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/config`, body),
+  syncBuyerBudget: () => post<MeResponse>("/api/me/buyer/sync-budget"),
+  hostHere: (label: string) => post<{ ok: boolean; endpoint: string }>(`/api/agents/${encodeURIComponent(label)}/host-here`),
+  addAgentTool: (label: string, body: AddAgentToolRequest) => post<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/tools`, body),
+  deleteAgentTool: (label: string, id: string) => del<AgentConfigView>(`/api/agents/${encodeURIComponent(label)}/tools/${encodeURIComponent(id)}`),
   createAgent: (body: CreateAgentRequest) => post<AgentSummary>("/api/agents", body),
 
   hire: (body: HireRequest) => post<HireResponse>("/api/hires", body),
@@ -142,9 +163,12 @@ export const api = {
   getHire: (hireId: string) => get<HireView>(`/api/hires/${encodeURIComponent(hireId)}`),
 
   tasks: () => get<TaskDetail[]>("/api/tasks"),
+  chainTasks: () => get<ChainTask[]>("/api/tasks/chain"),
   task: (id: string) => get<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`),
   taskTemplates: () => get<TaskTemplate[]>("/api/tasks/templates"),
   createTask: (body: CreateTaskRequest) => post<TaskDetail>("/api/tasks", body),
+  draftTests: (body: DraftTestsRequest) => post<DraftTestsResponse>("/api/tasks/draft-tests", body),
+  taskTests: (id: string) => get<PublishedTests>(`/api/tasks/${encodeURIComponent(id)}/tests.json`),
   hireForTask: (id: string, specialist: string) => post<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}/hire`, { specialist }),
   refundTask: (id: string) => post<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}/refund`),
   createDuel: (body: CreateDuelRequest) => post<DuelDetail>("/api/duels", body),
@@ -155,6 +179,15 @@ export const api = {
   connectNamera: (body: ConnectNameraRequest) => post<SpendPolicyView>("/api/me/spend/connect", body),
   disconnectNamera: () => request<{ ok: boolean }>("/api/me/spend", { method: "DELETE" }),
   tryOverspend: () => post<TryOverspendResponse>("/api/me/spend/try-overspend"),
+
+  sandboxRuns: () => get<SandboxRunView[]>("/api/sandbox/runs"),
+  sandboxRun: (id: string) => get<SandboxRunView>(`/api/sandbox/runs/${encodeURIComponent(id)}`),
+  startSandboxRun: (body: StartSandboxRunRequest) => post<SandboxRunView>("/api/sandbox/runs", body),
+  stopSandboxRun: (id: string) => post<SandboxRunView>(`/api/sandbox/runs/${encodeURIComponent(id)}/stop`),
+
+  proofs: () => get<ProofView[]>("/api/proofs"),
+  runProof: (body: RunProofRequest) => post<ProofView>("/api/proofs/demo", body),
+  subcontract: (body: SubcontractRequest) => post<SubcontractResponse>("/api/proofs/subcontract", body),
 
   arenaState: () => get<ArenaState>("/api/arena/state"),
   runOpenAttack: () => post<ArenaState>("/api/arena/open/run"),

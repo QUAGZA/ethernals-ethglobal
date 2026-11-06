@@ -12,15 +12,27 @@ import {
   type SpendStateView,
   type StatsResponse,
   type TryOverspendResponse,
+  modelTypeFor,
+  TASK_TYPE_LABELS,
+  TASK_TYPES,
 } from "@ethernals/shared";
 import { createSellerAgent, ensureBuyerAgent } from "./agents";
 import { getArenaState, runEthernalsAttack, runOpenAttack } from "./arena";
-import { agentReceipts, brainView, currentModelId } from "./brain";
+import { assistantsAllowedFor, checkAssistantBudget, MAX_ASSISTANTS } from "./assistants";
+import { agentReceipts, brainSettingsView, brainView, currentModelId, updateBrainSettings } from "./brain";
+import { assertPublicUrl, listMcpTools } from "./agent-tools";
+import { adoptAgentsFor } from "./adopt";
+import { chainTasks } from "./chain-tasks";
+import { ensureHandleClaim, publishHandleClaim, readHandleClaim } from "./people";
+import { publishEndpoint, queueConfigPublish } from "./ens";
 import { hireAsAgent } from "./buyer";
 import { config } from "./config";
-import { createSessionToken, randomId, readSessionToken } from "./crypto";
+import { createSessionToken, encryptSecret, nullifierHash, randomId, readSessionToken } from "./crypto";
 import {
   countHires,
+  deleteAgentTool,
+  getChainAgent,
+  listChainAgents,
   deleteSpendAccount,
   findPersonByHandle,
   findPersonByNullifier,
@@ -31,6 +43,7 @@ import {
   getHire,
   getPerson,
   getTask,
+  insertAgentTool,
   insertPerson,
   listAgents,
   listAgentsOfPerson,
@@ -38,6 +51,7 @@ import {
   listSpendEvents,
   listTasks,
   setCredentialExpiry,
+  updateAgent,
   upsertSpendAccount,
   type PersonRow,
 } from "./db";
@@ -45,12 +59,15 @@ import { AppError, badRequest, conflict, forbidden, notFound, unauthorized } fro
 import { emit, log, recentEvents, subscribe } from "./events";
 import { getBalances } from "./hedera";
 import { createRpContext, verifyWorldProof } from "./identity";
+import { listRunViews, runView, startRun, startRunSchema, stopRun } from "./agent-sandbox";
 import { buildNameraGuard, encryptNameraKey, guardFor, spendEventView } from "./spend";
-import { connectNameraSchema, createDuelSchema, createTaskSchema, hireForTaskSchema } from "./task-schemas";
-import { clientBuyer, createDuel, createTask, hireSpecialist, loadTemplate, refundTask, tryOverspend } from "./task-service";
+import { connectNameraSchema, createDuelSchema, createTaskSchema, draftTestsSchema, hireForTaskSchema } from "./task-schemas";
+import { draftTests } from "./test-writer";
+import { clientBuyer, createDuel, createTask, hireSpecialist, loadTemplate, publishedTests, refundTask, tryOverspend } from "./task-service";
+import { capabilitiesOf, getProofView, listProofViews, runDemoProof, runSubcontract } from "./proofs";
 import { submitRating } from "./verifier";
 import { verifierHealth } from "./verifier-client";
-import { agentDetail, agentView, duelView, hireView, personView, taskView } from "./views";
+import { agentDetail, agentView, duelView, hireView, personView, remoteAgentDetail, remoteAgentView, taskView } from "./views";
 
 const COOKIE = "ethernals_session";
 const HANDLE_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$/;
@@ -96,13 +113,27 @@ function startBuyerCreation(person: PersonRow): void {
   buyerCreation.set(person.id, p);
 }
 
+/** Display-only balances for /api/me: cached 10 s and capped at 3 s, so a slow mirror node never stalls every page. */
+const balanceCache = new Map<string, { at: number; value: Awaited<ReturnType<typeof getBalances>> }>();
+async function displayBalances(accountId: string) {
+  const cached = balanceCache.get(accountId);
+  if (cached && Date.now() - cached.at < 10_000) return cached.value;
+  const fetchFresh = getBalances(accountId).then((value) => {
+    balanceCache.set(accountId, { at: Date.now(), value });
+    return value;
+  });
+  fetchFresh.catch(() => undefined);
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+  return (await Promise.race([fetchFresh.catch(() => null), timeout])) ?? cached?.value ?? null;
+}
+
 async function meResponse(person: PersonRow | null): Promise<MeResponse> {
   if (!person) return { person: null, buyerAgent: null, agents: [], hires: [] };
   const mine = listAgentsOfPerson(person.id).filter((a) => !a.arena_role);
   const buyer = mine.find((a) => a.kind === "buyer");
   let buyerAgent: MeResponse["buyerAgent"] = null;
   if (buyer) {
-    const balances = await getBalances(buyer.hedera_account_id).catch(() => null);
+    const balances = await displayBalances(buyer.hedera_account_id);
     buyerAgent = {
       ...(await agentView(buyer)),
       usdcBalance: balances ? formatUnits6(balances.usdcUnits) : "?",
@@ -133,15 +164,33 @@ function taskById(id: string) {
 const verifySchema = z.object({ handle: z.string(), proof: z.unknown() });
 const createAgentSchema = z.object({
   label: z.string().min(1),
-  taskType: z.enum(["summarize", "translate", "code-fix"]),
+  taskType: z.enum(TASK_TYPES),
   basePrice: z.string().min(1),
   description: z.string().max(200).optional(),
+  zgApiKey: z.string().trim().regex(/^sk-\S{8,}$/, "A 0G key starts with sk-.").max(300).optional(),
+  modelType: z.enum(["text", "image", "decision", "embedding", "video"]).optional(),
+  model: z.string().trim().max(120).optional(),
+  systemPrompt: z.string().max(4000).optional(),
+});
+const updateConfigSchema = z.object({
+  modelType: z.enum(["text", "image", "decision", "embedding", "video"]).optional(),
+  model: z.string().trim().min(1).max(120).optional(),
+  systemPrompt: z.string().max(4000).optional(),
+  zgApiKey: z.string().trim().regex(/^sk-\S{8,}$/, "A 0G key starts with sk-.").max(300).optional(),
+});
+const addToolSchema = z.object({
+  kind: z.enum(["mcp", "http"]),
+  name: z.string().trim().min(1).max(60),
+  url: z.string().trim().url().max(500),
+  description: z.string().max(500).optional(),
+  authHeader: z.string().max(600).optional(),
+  schemaJson: z.string().max(8000).optional(),
 });
 const hireSchema = z.object({
   agent: z.string().min(1),
   input: z.string().min(1).max(8000),
   translateTo: z.enum(["hi", "mr"]).nullish(),
-  consent: z.object({ forward: z.boolean(), subBudget: z.string() }),
+  consent: z.object({ forward: z.boolean(), subBudget: z.string(), maxAssistants: z.number().int().min(0).max(MAX_ASSISTANTS).default(0) }),
 });
 const rateSchema = z.object({
   rating: z.number().int().min(1).max(5),
@@ -174,6 +223,7 @@ export function createApi(): Router {
       hederaNetwork: "testnet",
       paymentAsset: config.hedera.paymentAsset,
       ledgerAddress: config.hedera.ledgerAddressOrNull(),
+      usdcTokenId: config.hedera.usdcTokenId,
       zeroG: { enabled: config.zeroG.enabled(), network: config.zeroG.network(), model: config.zeroG.enabled() ? currentModelId() : config.llm.model },
       namera: { enabled: config.namera.enabled() },
       escrow: { address: config.escrow.addressOrNull(), token: config.escrow.tokenOrNull(), chainId: ESCROW_CHAIN_ID },
@@ -202,18 +252,30 @@ export function createApi(): Router {
     if (existing) {
       setSession(res, existing.id);
       startBuyerCreation(existing);
+      void ensureHandleClaim(existing, nullifier);
+      void adoptAgentsFor(existing);
       res.json({ ...(await meResponse(existing)), notice: `This World ID is already registered as "${existing.handle}". You are signed in.` });
       return;
     }
     if (!HANDLE_REGEX.test(handle)) throw badRequest("Handles use 1-24 lowercase letters, digits or hyphens.");
+    // The handle is also claimed on-chain (ENS), so it is unique across servers and the same human keeps one identity.
+    let claim: Awaited<ReturnType<typeof readHandleClaim>> = null;
+    try {
+      claim = await readHandleClaim(handle);
+    } catch (err) {
+      log.warn("could not read the on-chain handle claim; continuing with local checks", { error: (err as Error).message });
+    }
+    if (claim && claim.nullhash !== nullifierHash(nullifier)) throw conflict(`The handle "${handle}" is already claimed by someone else.`);
     if (findPersonByHandle(handle) || getAgentByLabel(`${handle}-buyer`)) throw conflict(`The handle "${handle}" is taken.`);
     const person = insertPerson({
-      id: randomId("person"),
+      id: claim?.personId && !getPerson(claim.personId) ? claim.personId : randomId("person"),
       world_nullifier: nullifier,
       handle,
       mode: config.world.humanMode,
       credential_expires_at: null,
     });
+    if (!claim) publishHandleClaim(person, nullifier);
+    else void adoptAgentsFor(person);
     setSession(res, person.id);
     startBuyerCreation(person);
     res.json(await meResponse(person));
@@ -244,6 +306,17 @@ export function createApi(): Router {
   r.post("/api/me/buyer", async (req, res) => {
     const person = requirePerson(req);
     await ensureBuyerAgent(person);
+    res.json(await meResponse(person));
+  });
+
+  // After the person sends USDC to their buyer agent from their own wallet: spend up to the full on-chain balance.
+  r.post("/api/me/buyer/sync-budget", async (req, res) => {
+    const person = requirePerson(req);
+    const buyer = listAgentsOfPerson(person.id).find((a) => a.kind === "buyer" && !a.arena_role);
+    if (!buyer) throw new AppError(409, "Your buyer agent is still being created.", "Wait a few seconds and try again.");
+    const balances = await getBalances(buyer.hedera_account_id);
+    updateAgent(buyer.key, { budget_remaining: balances.usdcUnits.toString() });
+    balanceCache.delete(buyer.hedera_account_id);
     res.json(await meResponse(person));
   });
 
@@ -290,7 +363,11 @@ export function createApi(): Router {
       policy = await guard.policy();
     } catch (err) {
       if (err instanceof AppError) throw err;
-      throw badRequest("Namera did not accept those details.", "Check the API key, wallet id and session key id in your Namera dashboard.");
+      log.error("reading a Namera session key failed", err);
+      throw new AppError(502, "Could not read that session key from Namera.", (err as Error).message.split("\n")[0]);
+    }
+    if (policy.status !== "active") {
+      throw badRequest(`This session key is ${policy.status === "unknown" ? "not installed yet" : policy.status}.`, "In dashboard.namera.ai, approve its installation on Sepolia, then connect it again.");
     }
     upsertSpendAccount({
       person_id: person.id,
@@ -317,22 +394,113 @@ export function createApi(): Router {
   // ------------------------------------------------------------------ agents
   r.get("/api/agents", async (_req, res) => {
     const sellers = listAgents("seller").filter((a) => !a.arena_role);
-    res.json(await Promise.all(sellers.map(agentView)));
+    const local = await Promise.all(sellers.map(agentView));
+    // Agents other servers created: found on-chain (ENS + HireLedger), shown hire-only.
+    const names = new Set(sellers.map((a) => a.ens_name));
+    const remote = await Promise.all(listChainAgents().filter((r) => !names.has(r.name)).map(remoteAgentView));
+    res.json([...local, ...remote]);
   });
 
   r.get("/api/agents/:label", async (req, res) => {
     const label = String(req.params.label);
     const agent = getAgentByLabel(label) ?? getAgentByEnsName(label);
-    if (!agent) throw notFound(`No agent named ${label}.`);
+    if (!agent) {
+      const remote = getChainAgent(label);
+      if (!remote) throw notFound(`No agent named ${label}.`);
+      res.json(await remoteAgentDetail(remote));
+      return;
+    }
     res.json(await agentDetail(agent));
   });
 
+  // Settings-like details (model, key, credit, receipts) are for the creator only; everyone else gets public stats.
+  const isCreator = (req: Request, agent: { person_id: string }) => sessionPerson(req)?.id === agent.person_id;
+
   r.get("/api/agents/:label/brain", (req, res) => {
-    res.json(brainView(agentByName(String(req.params.label))));
+    const agent = agentByName(String(req.params.label));
+    const view = brainView(agent);
+    if (isCreator(req, agent)) {
+      res.json(view);
+      return;
+    }
+    res.json({ ...view, model: "", keyLabel: null, creditNeuron: "0", spentNeuron: "0", creditedFromEarningsNeuron: "0", lastRequestId: null });
   });
 
   r.get("/api/agents/:label/inference", (req, res) => {
-    res.json(agentReceipts(agentByName(String(req.params.label))));
+    const agent = agentByName(String(req.params.label));
+    res.json(isCreator(req, agent) ? agentReceipts(agent) : []);
+  });
+
+  // Provider-only settings: model, system prompt, own key, MCP and HTTP tools.
+  const ownedAgent = (req: Request) => {
+    const person = requirePerson(req);
+    const agent = agentByName(String(req.params.label));
+    if (agent.person_id !== person.id) throw forbidden("Only the agent's owner can change its settings.");
+    return agent;
+  };
+  r.get("/api/agents/:label/config", (req, res) => {
+    res.json(brainSettingsView(ownedAgent(req)));
+  });
+  r.put("/api/agents/:label/config", (req, res) => {
+    const agent = ownedAgent(req);
+    const settings = updateConfigSchema.parse(req.body);
+    if (settings.modelType && agent.task_type && settings.modelType !== modelTypeFor(agent.task_type)) {
+      throw badRequest(`A ${TASK_TYPE_LABELS[agent.task_type]} agent can't use a ${settings.modelType} model.`);
+    }
+    updateBrainSettings(agent, settings);
+    queueConfigPublish(agent);
+    res.json(brainSettingsView(agent));
+  });
+  r.post("/api/agents/:label/tools", async (req, res) => {
+    const agent = ownedAgent(req);
+    const body = addToolSchema.parse(req.body);
+    try {
+      assertPublicUrl(body.url);
+    } catch (err) {
+      throw badRequest((err as Error).message);
+    }
+    const row = {
+      id: randomId("tool"),
+      agent_key: agent.key,
+      kind: body.kind,
+      name: body.name,
+      url: body.url,
+      description: body.description?.trim() ?? "",
+      schema_json: body.schemaJson?.trim() || null,
+      auth_enc: body.authHeader?.trim() ? encryptSecret(body.authHeader.trim()) : null,
+    };
+    if (body.kind === "http" && row.schema_json) {
+      try {
+        JSON.parse(row.schema_json);
+      } catch {
+        throw badRequest("The argument schema is not valid JSON.");
+      }
+    }
+    if (body.kind === "mcp") {
+      try {
+        await listMcpTools(row); // prove the server answers before saving it
+      } catch (err) {
+        throw badRequest(`Could not reach that MCP server: ${(err as Error).message}`, "It must speak MCP over Streamable HTTP at a public URL.");
+      }
+    }
+    insertAgentTool(row);
+    queueConfigPublish(agent);
+    res.json(brainSettingsView(agent));
+  });
+  r.delete("/api/agents/:label/tools/:id", (req, res) => {
+    const agent = ownedAgent(req);
+    if (!deleteAgentTool(String(req.params.id), agent.key)) throw notFound("No such tool.");
+    queueConfigPublish(agent);
+    res.json(brainSettingsView(agent));
+  });
+  // Make this server the agent's host: write its public URL into the agent's ENS endpoint record.
+  r.post("/api/agents/:label/host-here", async (req, res) => {
+    const agent = ownedAgent(req);
+    if (/localhost|127\.0\.0\.1/.test(config.publicBaseUrl)) {
+      throw badRequest("This server's PUBLIC_BASE_URL is local.", "Run pnpm dev:public so the server has a public tunnel URL first.");
+    }
+    await publishEndpoint(agent);
+    res.json({ ok: true, endpoint: `${config.publicBaseUrl}/a/${agent.label}/task` });
   });
 
   r.post("/api/agents", async (req, res) => {
@@ -349,6 +517,11 @@ export function createApi(): Router {
     const buyer = listAgentsOfPerson(person.id).find((a) => a.kind === "buyer" && !a.arena_role);
     if (!buyer) throw new AppError(409, "Your buyer agent is still being created.", "Wait a few seconds and try again, or open /me.");
     const target = body.agent.includes(".") ? body.agent : `${body.agent}.${config.ens.parent()}`;
+    if (body.consent.maxAssistants) {
+      if (body.translateTo) throw badRequest("Pick assistants or the translate option, not both.");
+      if (!assistantsAllowedFor(target)) throw badRequest("Only text agents can hire assistants.");
+      await checkAssistantBudget(person, buyer, body.consent);
+    }
     const result = await hireAsAgent({
       buyer,
       targetEnsName: target,
@@ -363,6 +536,7 @@ export function createApi(): Router {
       paymentTxId: result.paymentTxId,
       paymentUrl: result.paymentUrl,
       subHire: result.subHire,
+      assistants: result.assistants,
     };
     res.json(response);
   });
@@ -395,6 +569,12 @@ export function createApi(): Router {
     res.json(listTasks().map(taskView));
   });
 
+  // Escrow tasks found on Sepolia that this server's database does not know (read-only, chain is the source of truth).
+  r.get("/api/tasks/chain", async (_req, res) => {
+    const known = new Set(listTasks(10_000).map((t) => t.chain_task_id).filter(Boolean));
+    res.json((await chainTasks()).filter((t) => !known.has(t.chainTaskId)));
+  });
+
   // The public part only: hidden tests stay with the verifier.
   r.get("/api/tasks/templates", async (_req, res) => {
     const slugify = await loadTemplate("slugify").then((t) => t.spec, () => null);
@@ -404,6 +584,15 @@ export function createApi(): Router {
   r.post("/api/tasks", async (req, res) => {
     const person = requirePerson(req);
     res.json(taskView(await createTask(person, createTaskSchema.parse(req.body))));
+  });
+
+  r.post("/api/tasks/draft-tests", async (req, res) => {
+    const person = requirePerson(req);
+    res.json(await draftTests(person, draftTestsSchema.parse(req.body)));
+  });
+
+  r.get("/api/tasks/:id/tests.json", async (req, res) => {
+    res.json(await publishedTests(taskById(String(req.params.id))));
   });
 
   r.get("/api/tasks/:id/spec.json", (req, res) => {
@@ -441,6 +630,25 @@ export function createApi(): Router {
     const id = String(req.params.id);
     if (!getDuel(id)) throw notFound("Unknown duel.");
     res.json(duelView(id));
+  });
+
+  // ------------------------------------------------------------------ agent sandbox
+  r.get("/api/sandbox/runs", (req, res) => {
+    const viewer = sessionPerson(req);
+    res.json(listRunViews(viewer?.id ?? null));
+  });
+
+  r.post("/api/sandbox/runs", async (req, res) => {
+    const person = requirePerson(req);
+    res.json(await startRun(person, startRunSchema.parse(req.body)));
+  });
+
+  r.get("/api/sandbox/runs/:id", (req, res) => {
+    res.json(runView(String(req.params.id), sessionPerson(req)?.id ?? null));
+  });
+
+  r.post("/api/sandbox/runs/:id/stop", (req, res) => {
+    res.json(stopRun(requirePerson(req), String(req.params.id)));
   });
 
   r.get("/api/verifier/health", async (_req, res) => {
@@ -481,6 +689,31 @@ export function createApi(): Router {
     const attacker = req.body?.attacker === "other" ? "other" : "provider";
     runEthernalsAttack(attacker);
     res.json(await getArenaState());
+  });
+
+  // ------------------------------------------------------------------ verified work (validation receipts)
+  r.post("/api/proofs/demo", async (req, res) => {
+    const body = z.object({ patch: z.enum(["good", "weak"]), agent: z.string().max(32).optional() }).parse(req.body ?? {});
+    res.json(await runDemoProof(body.patch, body.agent));
+  });
+
+  r.post("/api/proofs/subcontract", async (req, res) => {
+    const body = z
+      .object({ agent: z.string().max(32), specialist: z.string().max(32), specialistPatch: z.enum(["good", "weak"]).optional() })
+      .parse(req.body ?? {});
+    res.json(await runSubcontract(body.agent, body.specialist, body.specialistPatch ?? "good"));
+  });
+
+  r.get("/api/proofs", async (_req, res) => {
+    res.json(await listProofViews());
+  });
+
+  r.get("/api/proofs/:id", async (req, res) => {
+    res.json(await getProofView(String(req.params.id)));
+  });
+
+  r.get("/api/agents/:label/capabilities", (req, res) => {
+    res.json(capabilitiesOf(String(req.params.label)));
   });
 
   // ------------------------------------------------------------------ admin (demo)

@@ -3,10 +3,10 @@
  * with live records, and — for buyer agents — a starting USDC balance and budget.
  */
 import { namehash } from "viem/ens";
-import { assertValidLabel, formatUnits6, parseUnits6, type CreateAgentRequest } from "@ethernals/shared";
+import { assertValidLabel, DEFAULT_MEDIA_MODELS, formatUnits6, modelTypeFor, parseUnits6, type CreateAgentRequest, type TaskType } from "@ethernals/shared";
 import { config } from "./config";
 import { spinUpBrain } from "./brain";
-import { encryptSecret, personHash, providerKey } from "./crypto";
+import { deriveAgentKeyHex, encryptSecret, personHash, providerKey } from "./crypto";
 import { getAgentByLabel, getAgentByEnsName, insertAgent, listAgentsOfPerson, updateAgent, type AgentRow, type PersonRow } from "./db";
 import { agentEnsName, publishAgent } from "./ens";
 import { badRequest, conflict } from "./errors";
@@ -23,13 +23,17 @@ interface CreateOptions {
   person: PersonRow;
   label: string;
   kind: "seller" | "buyer";
-  taskType: "summarize" | "translate" | "code-fix" | null;
+  taskType: TaskType | null;
   basePriceUnits: bigint;
   description: string;
   startingUnits?: bigint;
   publishEns?: boolean;
   arenaRole?: string | null;
   strategy?: AgentRow["strategy"];
+  zgApiKey?: string;
+  modelType?: "text" | "image" | "decision" | "embedding" | "video";
+  model?: string;
+  systemPrompt?: string;
   onStep?: (msg: string) => void;
 }
 
@@ -60,7 +64,7 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
   const step = opts.onStep ?? (() => {});
 
   step(`Creating a Hedera account for ${ensName}...`);
-  const account = await createAgentAccount(opts.kind === "seller" ? 2 : 1);
+  const account = await createAgentAccount(opts.kind === "seller" ? 2 : 1, deriveAgentKeyHex(ensName));
 
   let agent = insertAgent({
     key,
@@ -94,7 +98,7 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
     updateAgent(key, { ledger_registered: 1 });
     born(ensName, "ledger", "HireLedger ✓");
     step("Spinning up its brain on 0G Compute...");
-    await spinUpBrain(agent);
+    await spinUpBrain(agent, { ownKey: opts.zgApiKey, modelType: opts.modelType, model: opts.model, systemPrompt: opts.systemPrompt });
     if (opts.taskType === "code-fix") await spinUpOnSepolia(agent);
     agent = getAgentByLabel(opts.label)!;
   }
@@ -131,6 +135,8 @@ async function createAgent(opts: CreateOptions): Promise<AgentRow> {
 }
 
 const DEFAULT_DESCRIPTIONS: Record<CreateAgentRequest["taskType"], string> = {
+  "image-gen": "Generates an image from a text prompt.",
+  "video-gen": "Generates a short video from a text prompt.",
   summarize: "Summarizes text in up to 5 bullet points.",
   translate: "Translates text into Hindi or Marathi.",
   "code-fix": "Fixes bugs in Python repositories. Paid only when hidden tests pass.",
@@ -150,6 +156,9 @@ export async function createSellerAgent(
   }
   if (basePrice <= 0n) throw badRequest("Base price must be more than 0.");
   const description = req.description?.trim() || DEFAULT_DESCRIPTIONS[req.taskType];
+  // The task type decides the model family, so an agent can't be sold as one thing and think on another.
+  const modelType = modelTypeFor(req.taskType);
+  const model = req.model?.trim() || (modelType === "text" ? undefined : DEFAULT_MEDIA_MODELS[modelType]);
   return createAgent({
     person,
     label: req.label.trim().toLowerCase(),
@@ -159,6 +168,10 @@ export async function createSellerAgent(
     description,
     startingUnits: parseUnits6(config.hedera.sellerStartingUsdc),
     strategy,
+    zgApiKey: req.zgApiKey?.trim() || undefined,
+    modelType,
+    model,
+    systemPrompt: req.systemPrompt?.trim() || undefined,
     onStep,
   });
 }

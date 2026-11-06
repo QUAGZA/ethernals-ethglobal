@@ -141,7 +141,7 @@ export const config = {
     routerBaseUrl: () => str("ZG_ROUTER_BASE_URL", "https://router-api-testnet.integratenetwork.work/v1").replace(/\/+$/, ""),
     managementKey: () => str("ZG_MANAGEMENT_KEY") || null,
     apiKeyOrNull: () => str("ZG_API_KEY") || null,
-    apiKey: () => need("ZG_API_KEY", `Create an API key (sk-...) at pc.testnet.0g.ai (${SETUP}, 0G Compute step).`),
+    apiKey: () => need("ZG_API_KEY", `Create a Private API key (sk-...) in the 0G console (${SETUP}, 0G Compute step).`),
     model: () => str("ZG_MODEL") || null,
     seedCreditNeuron: () => BigInt(str("ZG_SEED_CREDIT_NEURON", "300000000000000000")),
     minCreditNeuron: () => BigInt(str("ZG_MIN_CREDIT_NEURON", "60000000000000000")),
@@ -167,6 +167,13 @@ export const config = {
   namera: {
     enabled: () => bool("NAMERA_ENABLED", true),
     apiUrl: () => str("NAMERA_API_URL") || undefined,
+  },
+
+  /** Sandbox verifier (apps/verifier) and the Sepolia escrow it settles. */
+  proofs: {
+    verifierUrl: str("VERIFIER_URL", "http://127.0.0.1:4100").replace(/\/+$/, ""),
+    verifierToken: str("VERIFIER_TOKEN"),
+    escrow: (str("TASK_ESCROW_ADDRESS") || null) as `0x${string}` | null,
   },
 
   arena: {

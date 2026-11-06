@@ -7,7 +7,9 @@ import { ZodError } from "zod";
 import { createApi } from "./api";
 import { handleSellerTask } from "./agent-runtime";
 import { config, ConfigError } from "./config";
-import { getDb } from "./db";
+import { failInterruptedSandboxRuns, getDb, listAgents } from "./db";
+import { warmStats } from "./views";
+import { startChainIndexer } from "./chain-index";
 import { AppError } from "./errors";
 import { agentGate } from "./gate";
 import { log } from "./events";
@@ -19,6 +21,8 @@ import { startUnratedSweeper } from "./verifier";
 const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", true);
+// Custom tasks carry tests and patches. express.json leaves a body it has already parsed alone.
+app.use("/api/tasks", express.json({ limit: "1mb" }));
 app.use(express.json({ limit: "64kb" }));
 
 app.use("/a/:label/task", agentGate);
@@ -45,6 +49,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 getDb();
+failInterruptedSandboxRuns();
 app.listen(config.serverPort, () => {
   log.info(`server listening on http://127.0.0.1:${config.serverPort} (public URL ${config.publicBaseUrl})`);
   log.info(`LLM: ${config.zeroG.enabled() ? `0G Router (${config.zeroG.network()})` : llmMode()} · World: ${config.world.env}/${config.world.humanMode} · payments: ${config.hedera.paymentAsset} on Hedera testnet`);
@@ -54,5 +59,7 @@ app.listen(config.serverPort, () => {
     r.ok ? log.info(`facilitator OK: ${r.detail}`) : log.warn(`facilitator problem: ${r.detail}. Payments will fail; see SETUP.md Step 9.`),
   );
 });
+warmStats(listAgents("seller"));
+startChainIndexer();
 startUnratedSweeper();
 startEscrowWatcher();

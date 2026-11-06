@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { AgentSummary } from "@ethernals/shared";
-import { ensAppUrl } from "@ethernals/shared";
+import { ensAppUrl, TASK_TYPE_LABELS } from "@ethernals/shared";
 import { shortUsdc } from "@/lib/format";
 import { isMockAgent } from "@/lib/mock-agents";
 import { AvatarFor, displayName } from "./agent-card";
@@ -37,7 +37,7 @@ export function AgentCredibility({
   preview?: boolean;
 }) {
   const nick = displayName(agent);
-  const specialty = isMockAgent(agent) ? agent.specialty : (agent.taskType ?? agent.kind);
+  const specialty = isMockAgent(agent) ? agent.specialty : agent.taskType ? TASK_TYPE_LABELS[agent.taskType] : agent.kind;
   return (
     <section className="border-b border-ink px-[2.2vw] pt-[3.5vw] pb-[3vw] max-md:px-5 max-md:pt-10 max-md:pb-8">
       <div className="grid grid-cols-[minmax(180px,220px)_1fr] items-start gap-[3vw] max-md:grid-cols-1 max-md:gap-8">
@@ -70,7 +70,7 @@ export function AgentCredibility({
             ) : (
               <>
                 <ExtLink href={ensUrl || ensAppUrl(agent.ensName)}>ENS app</ExtLink>
-                <ExtLink href={hederaAccountUrl}>Hedera account {agent.hederaAccountId}</ExtLink>
+                {hederaAccountUrl && <ExtLink href={hederaAccountUrl}>Hedera account {agent.hederaAccountId}</ExtLink>}
               </>
             )}
           </div>
