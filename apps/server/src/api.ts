@@ -45,6 +45,7 @@ import { AppError, badRequest, conflict, forbidden, notFound, unauthorized } fro
 import { emit, log, recentEvents, subscribe } from "./events";
 import { getBalances } from "./hedera";
 import { createRpContext, verifyWorldProof } from "./identity";
+import { listRunViews, runView, startRun, startRunSchema, stopRun } from "./agent-sandbox";
 import { buildNameraGuard, encryptNameraKey, guardFor, spendEventView } from "./spend";
 import { connectNameraSchema, createDuelSchema, createTaskSchema, hireForTaskSchema } from "./task-schemas";
 import { clientBuyer, createDuel, createTask, hireSpecialist, loadTemplate, refundTask, tryOverspend } from "./task-service";
@@ -442,6 +443,25 @@ export function createApi(): Router {
     const id = String(req.params.id);
     if (!getDuel(id)) throw notFound("Unknown duel.");
     res.json(duelView(id));
+  });
+
+  // ------------------------------------------------------------------ agent sandbox
+  r.get("/api/sandbox/runs", (req, res) => {
+    const viewer = sessionPerson(req);
+    res.json(listRunViews(viewer?.id ?? null));
+  });
+
+  r.post("/api/sandbox/runs", async (req, res) => {
+    const person = requirePerson(req);
+    res.json(await startRun(person, startRunSchema.parse(req.body)));
+  });
+
+  r.get("/api/sandbox/runs/:id", (req, res) => {
+    res.json(runView(String(req.params.id), sessionPerson(req)?.id ?? null));
+  });
+
+  r.post("/api/sandbox/runs/:id/stop", (req, res) => {
+    res.json(stopRun(requirePerson(req), String(req.params.id)));
   });
 
   r.get("/api/verifier/health", async (_req, res) => {
