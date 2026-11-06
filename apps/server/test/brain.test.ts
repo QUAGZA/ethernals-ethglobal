@@ -221,6 +221,16 @@ describe("self-funding", () => {
   });
 });
 
+describe("when the Router can't be reached", () => {
+  it("says so instead of \"fetch failed\"", async () => {
+    vi.stubGlobal("fetch", async (input: string) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify(MODELS));
+      throw new TypeError("fetch failed");
+    });
+    await expect(think(agent(person()), { purpose: "summarize", messages })).rejects.toThrow(/Can't reach the 0G Router at router\.test/);
+  });
+});
+
 describe("image and video agents", () => {
   const media = (modelType: "image" | "video", model: string) => {
     const seller = agent(person(), { task_type: modelType === "image" ? "image-gen" : "video-gen" });

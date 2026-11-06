@@ -235,6 +235,9 @@ async function postChat(apiKey: string, payload: unknown, path = "/chat/completi
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}`, ...(sealed ? { [TRUST_MODE_HEADER]: TRUST_MODE } : {}) },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    }).catch((err: Error) => {
+      if (err.name !== "TypeError") throw err; // keeps blocked hosts and timeouts as they are
+      throw new RouterError(503, `Can't reach the 0G Router at ${new URL(config.zeroG.routerBaseUrl()).host}. Check ZG_ROUTER_BASE_URL in .env.`);
     });
   const first = await send();
   if (!retryable(first.status)) return first;
