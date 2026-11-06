@@ -1,6 +1,6 @@
 /** Server <-> web types for verified work (validation receipts, per-category capabilities, subcontracting). */
 import type { CapabilityRecord, ReceiptCheck, TaskCategory, ValidationReceipt } from "./receipt";
-import type { Hex } from "./tasks";
+import type { Hex, InferenceReceipt } from "./tasks";
 
 export interface ProofView {
   id: string;
@@ -23,6 +23,8 @@ export interface ProofView {
   /** x402 payment that bought this work. Null unless a real paid hire was linked (the local demo does not move money). */
   payment: { amountUsdc: string; txUrl: string | null } | null;
   resultUrl: string | null;
+  /** 0G Compute calls the executing agent made to produce this output (empty for scripted demo patches). */
+  inference: InferenceReceipt[];
   logTail: string[];
   createdAt: string;
 }
@@ -55,4 +57,24 @@ export interface CapabilitiesView {
   /** Per-category records derived only from validation receipts. */
   records: (CapabilityRecord & { credential: "bronze" | "silver" | "gold" | null })[];
   totalVerified: number;
+}
+
+/** POST /api/proofs/live: a real coding agent thinks on 0G, writes the fix, and the independent validator grades it. */
+export interface RunLiveProofRequest {
+  agent?: string;
+}
+
+/** GET /api/brain */
+export interface BrainStatusView {
+  enabled: boolean;
+  network: "testnet" | "mainnet";
+  baseUrl: string;
+  keyConfigured: boolean;
+  managementKeyConfigured: boolean;
+  model: string | null;
+  reachable: boolean;
+  error: string | null;
+  calls: number;
+  /** Total model cost so far, neuron (1e18 neuron = 1 0G). */
+  spentNeuron: string;
 }

@@ -164,6 +164,21 @@ function migrate(d: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS proofs_agent ON proofs(agent);
+    CREATE TABLE IF NOT EXISTS inference_receipts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ref TEXT,
+      agent TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      task_id TEXT,
+      model TEXT NOT NULL,
+      request_id TEXT NOT NULL,
+      provider TEXT,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_neuron TEXT NOT NULL DEFAULT '0',
+      at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS inference_ref ON inference_receipts(ref);
     CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -384,4 +399,42 @@ export function listProofsForAgent(agent: string): ProofRow[] {
 }
 export function setProofParent(id: string, parentId: string): void {
   getDb().prepare("UPDATE proofs SET parent_proof_id = ? WHERE id = ?").run(parentId, id);
+}
+
+// ---------------------------------------------------------------- 0G inference receipts (one row per model call)
+export interface InferenceRow {
+  id: number;
+  ref: string | null;
+  agent: string;
+  purpose: string;
+  task_id: string | null;
+  model: string;
+  request_id: string;
+  provider: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_neuron: string;
+  at: string;
+}
+export function insertInference(r: Omit<InferenceRow, "id" | "ref">): number {
+  const res = getDb()
+    .prepare(
+      "INSERT INTO inference_receipts (ref, agent, purpose, task_id, model, request_id, provider, prompt_tokens, completion_tokens, cost_neuron, at) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(r.agent, r.purpose, r.task_id, r.model, r.request_id, r.provider, r.prompt_tokens, r.completion_tokens, r.cost_neuron, r.at);
+  return Number(res.lastInsertRowid);
+}
+export function linkInference(ids: number[], ref: string): void {
+  const stmt = getDb().prepare("UPDATE inference_receipts SET ref = ? WHERE id = ?");
+  for (const id of ids) stmt.run(ref, id);
+}
+export function listInferenceByRef(ref: string): InferenceRow[] {
+  return getDb().prepare("SELECT * FROM inference_receipts WHERE ref = ? ORDER BY id").all(ref) as unknown as InferenceRow[];
+}
+export function listInference(limit = 50): InferenceRow[] {
+  return getDb().prepare("SELECT * FROM inference_receipts ORDER BY id DESC LIMIT ?").all(limit) as unknown as InferenceRow[];
+}
+export function inferenceTotals(): { calls: number; spentNeuron: string } {
+  const rows = getDb().prepare("SELECT cost_neuron FROM inference_receipts").all() as unknown as { cost_neuron: string }[];
+  return { calls: rows.length, spentNeuron: rows.reduce((s, r) => s + BigInt(r.cost_neuron || "0"), 0n).toString() };
 }

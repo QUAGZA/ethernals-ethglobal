@@ -8,6 +8,7 @@ import type {
   ApiError,
   ArenaRunRequest,
   ArenaState,
+  BrainStatusView,
   CreateAgentRequest,
   DevLoginRequest,
   HireRequest,
@@ -115,6 +116,8 @@ export const api = {
   getHire: (hireId: string) => get<HireView>(`/api/hires/${encodeURIComponent(hireId)}`),
 
   proofs: () => get<ProofView[]>("/api/proofs"),
+  brain: () => get<BrainStatusView>("/api/brain"),
+  runLiveProof: (agent?: string) => post<ProofView>("/api/proofs/live", { agent }),
   runProof: (body: RunProofRequest) => post<ProofView>("/api/proofs/demo", body),
   subcontract: (body: SubcontractRequest) => post<SubcontractResponse>("/api/proofs/subcontract", body),
 

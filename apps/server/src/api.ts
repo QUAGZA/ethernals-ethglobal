@@ -35,7 +35,8 @@ import { AppError, badRequest, conflict, forbidden, notFound, unauthorized } fro
 import { emit, log, recentEvents, subscribe } from "./events";
 import { getBalances } from "./hedera";
 import { createRpContext, verifyWorldProof } from "./identity";
-import { capabilitiesOf, getProofView, listProofViews, runDemoProof, runSubcontract } from "./proofs";
+import { brainStatus } from "./brain";
+import { capabilitiesOf, getProofView, listProofViews, runDemoProof, runLiveProof, runSubcontract } from "./proofs";
 import { submitRating } from "./verifier";
 import { agentDetail, agentView, hireView, personView } from "./views";
 
@@ -348,6 +349,15 @@ export function createApi(): Router {
   r.post("/api/proofs/demo", async (req, res) => {
     const body = z.object({ patch: z.enum(["good", "weak"]), agent: z.string().max(32).optional() }).parse(req.body ?? {});
     res.json(await runDemoProof(body.patch, body.agent));
+  });
+
+  r.post("/api/proofs/live", async (req, res) => {
+    const body = z.object({ agent: z.string().max(32).optional() }).parse(req.body ?? {});
+    res.json(await runLiveProof(body.agent));
+  });
+
+  r.get("/api/brain", async (_req, res) => {
+    res.json(await brainStatus());
   });
 
   r.post("/api/proofs/subcontract", async (req, res) => {

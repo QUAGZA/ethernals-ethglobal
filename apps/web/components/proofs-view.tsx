@@ -72,6 +72,17 @@ function ProofCard({ proof }: { proof: ProofView }) {
           {proof.check.reasons.join(" · ")}
         </p>
       )}
+      {proof.inference.length > 0 && (
+        <div className="mt-4 border p-4">
+          <p className="eyebrow m-0 opacity-60">THOUGHT ON 0G COMPUTE</p>
+          {proof.inference.map((r) => (
+            <p key={r.requestId} className="m-0 mt-2 text-[13px]">
+              model <code>{r.model}</code> · request id <code>{r.requestId}</code> · {r.promptTokens} in / {r.completionTokens} out tokens
+              {r.provider ? <> · provider <code>{short(r.provider)}</code></> : null}
+            </p>
+          ))}
+        </div>
+      )}
       <details className="mt-4 text-[12px]">
         <summary className="eyebrow cursor-pointer">RECEIPT JSON + VALIDATOR LOG</summary>
         <pre className="mt-2 max-h-72 overflow-auto bg-ink p-3 text-white">{JSON.stringify(proof.receipt, null, 2)}</pre>
@@ -83,6 +94,7 @@ function ProofCard({ proof }: { proof: ProofView }) {
 
 export function ProofsView() {
   const proofs = useLoad(api.proofs, "proofs");
+  const brain = useLoad(api.brain, "brain");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiRequestError | null>(null);
 
@@ -120,6 +132,14 @@ export function ProofsView() {
           <button className={btn} disabled={busy !== null} onClick={() => void run("good", () => api.runProof({ patch: "good" }))}>
             {busy === "good" ? "VALIDATING…" : "RUN A STRONG AGENT"}
           </button>
+          <button
+            className={btn}
+            disabled={busy !== null || !(brain.data?.enabled && brain.data.reachable)}
+            title="A real model on 0G writes the fix; the independent validator decides if it passes"
+            onClick={() => void run("live", () => api.runLiveProof())}
+          >
+            {busy === "live" ? "THINKING ON 0G…" : "RUN A LIVE 0G AGENT"}
+          </button>
           <button className={btn} disabled={busy !== null} onClick={() => void run("weak", () => api.runProof({ patch: "weak" }))}>
             {busy === "weak" ? "VALIDATING…" : "RUN A WEAK AGENT (FAILS)"}
           </button>
@@ -138,6 +158,13 @@ export function ProofsView() {
             {busy === "subweak" ? "SUBCONTRACTING…" : "…SPECIALIST FAILS"}
           </button>
         </div>
+        <p className="eyebrow mb-6 mt-0 opacity-70">
+          {brain.data === undefined
+            ? "Checking 0G…"
+            : brain.data.enabled && brain.data.reachable
+              ? `0G Compute ready · ${brain.data.network} · model ${brain.data.model} · ${brain.data.calls} calls so far`
+              : `0G not ready: ${brain.data.error ?? "set ZG_ENABLED and ZG_API_KEY in .env"}. Scripted agents still work.`}
+        </p>
         <ErrorNotice error={error} title="Could not validate" className="mb-6" />
         {proofs.error && !proofs.data ? (
           <ErrorNotice title="Could not load proofs" error={proofs.error} onRetry={() => void proofs.reload()} />

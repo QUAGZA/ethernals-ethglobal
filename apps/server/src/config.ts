@@ -141,6 +141,16 @@ export const config = {
     escrow: (str("TASK_ESCROW_ADDRESS") || null) as `0x${string}` | null,
   },
 
+  /** 0G Compute Router: an OpenAI-compatible API where agents think (docs.0g.ai > Compute > Router). */
+  zg: {
+    enabled: bool("ZG_ENABLED", false),
+    network: (str("ZG_NETWORK", "testnet") === "mainnet" ? "mainnet" : "testnet") as "testnet" | "mainnet",
+    baseUrl: str("ZG_ROUTER_BASE_URL", "https://router-api-testnet.integratenetwork.work/v1").replace(/\/+$/, ""),
+    apiKey: str("ZG_API_KEY"),
+    managementKey: str("ZG_MANAGEMENT_KEY"),
+    model: str("ZG_MODEL"),
+  },
+
   arena: {
     fakeReviewers: int("ARENA_FAKE_REVIEWERS", 20),
     farmHires: int("ARENA_FARM_HIRES", 20),
