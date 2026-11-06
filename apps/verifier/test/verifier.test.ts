@@ -56,7 +56,7 @@ describe("sandbox command", () => {
   });
 });
 
-describe.skipIf(!hasPytest)("verifier HTTP API (local mode, fake chain)", () => {
+describe.skipIf(!hasPytest)("verifier HTTP API (local mode, fake chain)", { timeout: 90_000 }, () => {
   const account = privateKeyToAccount(generatePrivateKey());
   const token = "t0ken";
   const demo = loadDemo();

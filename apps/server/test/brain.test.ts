@@ -88,3 +88,17 @@ describe("live agent helpers", () => {
     expect(proofs.extractCode("x = 1")).toBe("x = 1\n");
   });
 });
+
+describe("two accounts", () => {
+  it("spreads named agents across keys, keeps each agent on its key, and keeps the platform on the first", async () => {
+    const config = (await import("../src/config")).config;
+    config.zg.extraKeys = ["sk-second"];
+    expect(brain.keyPool()).toEqual(["sk-test", "sk-second"]);
+    const a = brain.keyFor("fixer");
+    const b = brain.keyFor("weak-fixer");
+    expect(new Set([a, b]).size).toBe(2);
+    expect(brain.keyFor("fixer")).toBe(a);
+    expect(brain.keyFor("platform")).toBe("sk-test");
+    config.zg.extraKeys = [];
+  });
+});

@@ -17,7 +17,7 @@ const filters: { value: Filter; label: string }[] = [
   { value: "translate", label: "TRANSLATE" },
 ];
 
-const glyphs: Record<TaskType, string> = { summarize: "≡", translate: "⇄", "code-fix": "⌘" };
+const glyphs: Record<TaskType, string> = { summarize: "≡", translate: "⇄", "code-fix": "⌘", custom: "✦" };
 
 function Stat({
   value,

@@ -147,6 +147,8 @@ export const config = {
     network: (str("ZG_NETWORK", "testnet") === "mainnet" ? "mainnet" : "testnet") as "testnet" | "mainnet",
     baseUrl: str("ZG_ROUTER_BASE_URL", "https://router-api-testnet.integratenetwork.work/v1").replace(/\/+$/, ""),
     apiKey: str("ZG_API_KEY"),
+    /** Extra sk- keys (comma separated), e.g. a second account. Agents are spread across [ZG_API_KEY, ...these]. */
+    extraKeys: str("ZG_API_KEYS").split(",").map((k) => k.trim()).filter(Boolean),
     managementKey: str("ZG_MANAGEMENT_KEY"),
     model: str("ZG_MODEL"),
   },

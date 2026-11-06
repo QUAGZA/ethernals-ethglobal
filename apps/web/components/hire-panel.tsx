@@ -270,7 +270,13 @@ export function HirePanel({
               Task text
               <textarea
                 className={`${fieldClass} mt-1 h-40 resize-y text-[13px] normal-case tracking-normal`}
-                placeholder={agent.taskType === "translate" ? "Text to translate…" : "Paste the text you want summarized…"}
+                placeholder={
+                  agent.taskType === "translate"
+                    ? "Text to translate…"
+                    : agent.taskType === "custom"
+                      ? "Describe the task for this agent…"
+                      : "Paste the text you want summarized…"
+                }
                 value={input}
                 maxLength={MAX_INPUT + 200}
                 disabled={hiring}
@@ -281,6 +287,7 @@ export function HirePanel({
               </span>
             </label>
 
+            {agent.taskType !== "custom" && (
             <label className="flex cursor-pointer items-start gap-3 leading-[1.5]">
               <input type="checkbox" className="mt-0.5 size-4 accent-ink" checked={translate} disabled={hiring} onChange={(e) => setTranslate(e.target.checked)} />
               <span>
@@ -288,11 +295,12 @@ export function HirePanel({
                 <span className="block text-[11px] opacity-60">The agent then needs a sub-agent (a translator) for part of the work.</span>
               </span>
             </label>
+            )}
 
             <label className="flex cursor-pointer items-start gap-3 leading-[1.5]">
               <input type="checkbox" className="mt-0.5 size-4 accent-ink" checked={forward} disabled={hiring} onChange={(e) => setForward(e.target.checked)} />
               <span>
-                Allow this agent to share my data with a sub-agent
+                {agent.brain?.tools.includes("hire_agent") ? "Allow this agent to hire other agents with my budget and share my text with them" : "Allow this agent to share my data with a sub-agent"}
                 <span className="block text-[11px] opacity-60">
                   Off by default. When off, our code blocks any attempt to send your text to another agent.
                 </span>

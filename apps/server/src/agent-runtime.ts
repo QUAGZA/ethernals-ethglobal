@@ -11,6 +11,7 @@ import { config } from "./config";
 import { randomId, sha256Hex } from "./crypto";
 import {
   addMandateSpend,
+  getAgentBrain,
   getAgentByEnsName,
   getAgentByLabel,
   getMandate,
@@ -20,7 +21,9 @@ import {
   type AgentRow,
   type MandateRow,
 } from "./db";
+import { runCustomAgent } from "./custom-agent";
 import { emit, log } from "./events";
+import { ToolError } from "./tools";
 import { summarize, translate } from "./llm";
 import { quoteUnits } from "./payments";
 import { withWorkspace } from "./sandbox";
@@ -119,6 +122,7 @@ async function runTask(
   hireId: string,
   mandate: MandateRow,
 ): Promise<{ result: string; subHire: SubHireOutcome | null }> {
+  if (seller.task_type === "custom") return runCustom(seller, body, hireId, mandate);
   if (seller.task_type === "translate") {
     return { result: await translate(body.input, body.translateTo ?? "hi", { agent: seller.ens_name }), subHire: null };
   }
@@ -208,3 +212,92 @@ function findTranslateAgent(seller: AgentRow): AgentRow | undefined {
 }
 
 export const internalTaskUrl = (label: string) => `${config.internalBaseUrl}/a/${label}/task`;
+
+/** A hoster custom agent: its own specialization, tools and 0G key. Sub-hires are gated by the customer consent. */
+async function runCustom(
+  seller: AgentRow,
+  body: TaskBody,
+  hireId: string,
+  mandate: MandateRow,
+): Promise<{ result: string; subHire: SubHireOutcome | null }> {
+  const brain = getAgentBrain(seller.key);
+  if (!brain) throw new Error("This agent has no brain configured.");
+  let lastOutcome: SubHireOutcome | null = null;
+  const run = await runCustomAgent({
+    agent: seller,
+    brain,
+    task: body.input,
+    taskId: hireId,
+    hire: async (label, task) => {
+      const outcome = await hireOther({ seller, hireId, mandateId: mandate.id, targetLabel: label, data: task });
+      lastOutcome = stripResult(outcome);
+      if (outcome.status !== "done" || outcome.result === undefined) {
+        throw new ToolError(`Could not hire ${label}: ${outcome.status}${outcome.reason ? ` (${outcome.reason})` : ""}.`);
+      }
+      return outcome.result;
+    },
+  });
+  return { result: run.result, subHire: lastOutcome };
+}
+
+/**
+ * Hire any other seller agent on behalf of the hired agent. Same rules as every sub-hire: the customer must have
+ * allowed it, the price must fit the remaining sub-budget, and the sub-hired agent gets NO right to sub-hire again.
+ */
+export async function hireOther(params: {
+  seller: AgentRow;
+  hireId: string;
+  mandateId: string;
+  targetLabel: string;
+  data: string;
+}): Promise<SubHireOutcome & { result?: string }> {
+  const target = getAgentByLabel(params.targetLabel.trim().toLowerCase());
+  if (!target || target.kind !== "seller") return { status: "skipped", reason: `No agent named "${params.targetLabel}".` };
+  if (target.key === params.seller.key) return { status: "skipped", reason: "An agent cannot hire itself.", agentEnsName: target.ens_name };
+  const mandate = getMandate(params.mandateId);
+
+  if (!mandate || mandate.forward !== 1) {
+    emit("subhire.blocked", {
+      hireId: params.hireId,
+      agentEnsName: params.seller.ens_name,
+      reason: "SUBHIRE_BLOCKED_NO_CONSENT",
+      message: `Blocked: ${params.seller.ens_name} tried to share this hire's data with ${target.ens_name} without consent.`,
+    });
+    return { status: "blocked", reason: "SUBHIRE_BLOCKED_NO_CONSENT", agentEnsName: target.ens_name };
+  }
+  const price = await quoteUnits(target);
+  const remaining = BigInt(mandate.sub_budget) - BigInt(mandate.spent);
+  if (new Date(mandate.expires_at).getTime() < Date.now() || price > remaining) {
+    emit("subhire.blocked", {
+      hireId: params.hireId,
+      agentEnsName: params.seller.ens_name,
+      reason: "SUBHIRE_BLOCKED_BUDGET",
+      message: `Blocked: ${target.ens_name} costs ${formatUnits6(price)}, above the remaining sub-budget ${formatUnits6(remaining)}.`,
+    });
+    return { status: "blocked", reason: "SUBHIRE_BLOCKED_BUDGET", agentEnsName: target.ens_name };
+  }
+
+  const { hireAsAgent } = await import("./buyer");
+  try {
+    const hired = await hireAsAgent({
+      buyer: params.seller,
+      targetEnsName: target.ens_name,
+      input: params.data.slice(0, 8000),
+      consent: { forward: false, subBudget: "0" },
+      maxUnits: remaining,
+      parentHireId: params.hireId,
+      autoRate: true,
+    });
+    addMandateSpend(mandate.id, price);
+    return {
+      status: "done",
+      agentEnsName: target.ens_name,
+      hireId: hired.hireId,
+      paymentUrl: hired.paymentTxId ? hashscanTxUrl(hired.paymentTxId) : null,
+      result: hired.result,
+    };
+  } catch (err) {
+    log.error("sub-hire failed", err);
+    return { status: "failed", reason: (err as Error).message, agentEnsName: target.ens_name };
+  }
+}

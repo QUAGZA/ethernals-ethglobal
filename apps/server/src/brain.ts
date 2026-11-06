@@ -7,7 +7,7 @@
  */
 import type { BrainStatusView, InferenceReceipt } from "@ethernals/shared";
 import { config } from "./config";
-import { insertInference, inferenceTotals } from "./db";
+import { insertInference, inferenceTotals, kvGet, kvSet } from "./db";
 import { AppError } from "./errors";
 import { log } from "./events";
 
@@ -23,9 +23,32 @@ interface ModelInfo {
 let modelCache: { at: number; models: ModelInfo[] } | null = null;
 const PREFERRED = ["0gm-1.0-35b-a3b", "glm-5.2"];
 
-async function routerFetch(path: string, init: RequestInit & { auth?: boolean } = {}): Promise<Response> {
+/** All configured sk- keys: ZG_API_KEY first, then ZG_API_KEYS. */
+export function keyPool(): string[] {
+  return [...new Set([config.zg.apiKey, ...config.zg.extraKeys].filter(Boolean))];
+}
+
+/**
+ * Which key an agent thinks with. The platform and checks use the first key. Each named agent is assigned the next
+ * key in turn the first time it thinks, and keeps it (stored), so two agents can spend from two separate accounts.
+ */
+export function keyFor(agent: string): string {
+  const pool = keyPool();
+  if (pool.length <= 1 || agent === "platform" || agent === "zg-check") return pool[0] ?? "";
+  const slot = `zgkey:${agent}`;
+  let idx = kvGet<number>(slot);
+  if (idx === null || idx >= pool.length) {
+    const next = kvGet<number>("zgkey:next") ?? 0;
+    idx = next % pool.length;
+    kvSet(slot, idx);
+    kvSet("zgkey:next", next + 1);
+  }
+  return pool[idx];
+}
+
+async function routerFetch(path: string, init: RequestInit & { auth?: boolean; key?: string } = {}): Promise<Response> {
   const headers: Record<string, string> = { "content-type": "application/json", ...(init.headers as Record<string, string> | undefined) };
-  if (init.auth !== false) headers.authorization = `Bearer ${config.zg.apiKey}`;
+  if (init.auth !== false) headers.authorization = `Bearer ${init.key ?? config.zg.apiKey}`;
   try {
     return await fetch(`${config.zg.baseUrl}${path}`, { ...init, headers, signal: init.signal ?? AbortSignal.timeout(10 * 60 * 1000) });
   } catch (err) {
@@ -52,12 +75,13 @@ export async function listModels(force = false): Promise<ModelInfo[]> {
 }
 
 /** ZG_MODEL if set; else a preferred model if the Router lists it; else the cheapest listed model. */
-export async function resolveModel(): Promise<ModelInfo> {
+export async function resolveModel(requested?: string): Promise<ModelInfo> {
   const models = await listModels();
   if (models.length === 0) throw new AppError(502, "The 0G Router lists no models.");
-  if (config.zg.model) {
-    const m = models.find((x) => x.id === config.zg.model);
-    if (!m) throw new AppError(400, `ZG_MODEL "${config.zg.model}" is not offered by the Router.`, `Available: ${models.map((x) => x.id).join(", ")}`);
+  const wanted = requested || config.zg.model;
+  if (wanted) {
+    const m = models.find((x) => x.id === wanted);
+    if (!m) throw new AppError(400, `Model "${wanted}" is not offered by the Router.`, `Available: ${models.map((x) => x.id).join(", ")}`);
     return m;
   }
   for (const id of PREFERRED) {
@@ -74,6 +98,10 @@ export interface ThinkOptions {
   system: string;
   user: string;
   maxTokens?: number;
+  /** A specific key (a hoster's own 0G key). Default: the key assigned to this agent from the server pool. */
+  apiKey?: string;
+  /** A specific model id. Default: the server's choice (ZG_MODEL or a preferred model). */
+  model?: string;
 }
 
 export interface Thought {
@@ -94,8 +122,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One model call on 0G. Retries rate limits and provider failures; records a receipt for every successful call. */
 export async function think(opts: ThinkOptions): Promise<Thought> {
-  if (!brainEnabled()) throw new AppError(503, "0G is not configured.", "Set ZG_ENABLED=true and ZG_API_KEY in .env (see docs/proof-of-work/0G-SETUP.md).");
-  const model = await resolveModel();
+  const apiKey = opts.apiKey ?? (brainEnabled() ? keyFor(opts.agent) : "");
+  if (!apiKey) throw new AppError(503, "0G is not configured.", "Set ZG_ENABLED=true and ZG_API_KEY in .env, or give the agent its own key (see docs/proof-of-work/0G-SETUP.md).");
+  const model = await resolveModel(opts.model);
   const request = JSON.stringify({
     model: model.id,
     // Thinking models spend many tokens on reasoning before the answer, so leave room.
@@ -108,7 +137,7 @@ export async function think(opts: ThinkOptions): Promise<Thought> {
 
   let res: Response | null = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    res = await routerFetch("/chat/completions", { method: "POST", body: request });
+    res = await routerFetch("/chat/completions", { method: "POST", body: request, key: apiKey });
     if (res.status !== 429 && res.status !== 502 && res.status !== 503) break;
     const wait = Number(res.headers.get("retry-after")) || 2 ** attempt * 2;
     log.warn(`0G Router HTTP ${res.status}, retrying in ${wait}s`);
@@ -166,6 +195,7 @@ export async function brainStatus(): Promise<BrainStatusView> {
     network: config.zg.network,
     baseUrl: config.zg.baseUrl,
     keyConfigured: config.zg.apiKey !== "",
+    keys: keyPool().length,
     managementKeyConfigured: config.zg.managementKey !== "",
     model: null,
     reachable: false,
@@ -180,4 +210,15 @@ export async function brainStatus(): Promise<BrainStatusView> {
     base.error = (e as Error).message;
   }
   return base;
+}
+
+/**
+ * Checks a hoster's own 0G key and model with one tiny call (a few hundred tokens at most). Run before an agent is
+ * created, so a wrong key fails with a clear message instead of failing on the first customer's task.
+ */
+export async function testBrainKey(apiKey: string, model?: string): Promise<{ model: string; requestId: string | null; models: string[] }> {
+  const models = (await listModels()).map((m) => m.id);
+  const chosen = await resolveModel(model || undefined);
+  const t = await think({ agent: "key-check", purpose: "check", system: "Reply with the single word: ok", user: "ping", maxTokens: 2000, apiKey, model: chosen.id });
+  return { model: chosen.id, requestId: t.receipt.requestId, models };
 }

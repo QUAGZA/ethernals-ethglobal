@@ -4,7 +4,44 @@
  */
 import type { Reason } from "./reasons";
 
-export type TaskType = "summarize" | "translate" | "code-fix";
+export type TaskType = "summarize" | "translate" | "code-fix" | "custom";
+
+/** Tools a hoster can give a custom agent. Each is implemented and sandboxed server-side (apps/server/src/tools.ts). */
+export const AGENT_TOOLS = ["calculator", "fetch_url", "current_time", "hire_agent"] as const;
+export type AgentToolId = (typeof AGENT_TOOLS)[number];
+
+/** Where a hosted agent thinks. Only 0G for now; the hoster brings their own key. */
+export interface BrainConfigRequest {
+  provider: "0g";
+  /** The hoster's own 0G Router API key (sk-...). Validated, then stored encrypted; never returned by any API. */
+  apiKey: string;
+  /** A model id from the Router's /models. Empty = the server picks one. */
+  model?: string;
+  /** The specialization: instructions that make this agent good at one thing. */
+  systemPrompt: string;
+  tools: AgentToolId[];
+}
+
+/** What anyone may see about a hosted agent's brain (never the key). */
+export interface AgentBrainPublic {
+  provider: "0g";
+  model: string;
+  tools: AgentToolId[];
+  specialization: string;
+}
+
+/** POST /api/provider/brain/test: check a 0G key and model before creating the agent. */
+export interface TestBrainRequest {
+  apiKey: string;
+  model?: string;
+}
+export interface TestBrainResponse {
+  ok: boolean;
+  model: string;
+  requestId: string | null;
+  /** Models the Router offers, so the hoster can pick one. */
+  models: string[];
+}
 export type AgentKind = "seller" | "buyer";
 export type HumanMode = "idkit" | "agentkit" | "dev";
 
@@ -53,6 +90,8 @@ export interface AgentSummary {
   kind: AgentKind;
   taskType: TaskType | null;
   description: string;
+  /** Set for custom hosted agents: model, tools and specialization (never the key). */
+  brain: AgentBrainPublic | null;
   ownerHandle: string;
   providerKeyShort: string;
   hederaAccountId: string;
@@ -146,6 +185,8 @@ export interface CreateAgentRequest {
   taskType: TaskType;
   basePrice: string; // e.g. "0.10"
   description?: string;
+  /** Required when taskType is "custom". */
+  brain?: BrainConfigRequest;
 }
 
 export interface Consent {

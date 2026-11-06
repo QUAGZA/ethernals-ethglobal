@@ -4,7 +4,7 @@ import { config } from "../src/config";
 
 console.log(`0G network: ${config.zg.network}`);
 console.log(`Router:     ${config.zg.baseUrl}`);
-console.log(`ZG_ENABLED: ${config.zg.enabled}   ZG_API_KEY: ${config.zg.apiKey ? "set" : "EMPTY"}   ZG_MANAGEMENT_KEY: ${config.zg.managementKey ? "set" : "empty (optional)"}`);
+console.log(`ZG_ENABLED: ${config.zg.enabled}   ZG_API_KEY: ${config.zg.apiKey ? "set" : "EMPTY"} (+${config.zg.extraKeys.length} extra)   ZG_MANAGEMENT_KEY: ${config.zg.managementKey ? "set" : "empty (optional)"}`);
 
 try {
   const models = await listModels(true);

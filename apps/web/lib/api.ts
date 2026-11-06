@@ -22,6 +22,8 @@ import type {
   RunProofRequest,
   StatsResponse,
   SubcontractRequest,
+  TestBrainRequest,
+  TestBrainResponse,
   SubcontractResponse,
   WorldVerifyRequest,
 } from "@ethernals/shared";
@@ -117,6 +119,7 @@ export const api = {
 
   proofs: () => get<ProofView[]>("/api/proofs"),
   brain: () => get<BrainStatusView>("/api/brain"),
+  testBrain: (body: TestBrainRequest) => post<TestBrainResponse>("/api/provider/brain/test", body),
   runLiveProof: (agent?: string) => post<ProofView>("/api/proofs/live", { agent }),
   runProof: (body: RunProofRequest) => post<ProofView>("/api/proofs/demo", body),
   subcontract: (body: SubcontractRequest) => post<SubcontractResponse>("/api/proofs/subcontract", body),

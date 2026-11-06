@@ -214,9 +214,12 @@ export function initialRecords(agent: AgentRow, providerKeyShort: string): Recor
   if (agent.kind === "seller") {
     Object.assign(records, {
       [ENS_KEYS.endpoint]: `${config.publicBaseUrl}/a/${agent.label}/task`,
-      [ENS_KEYS.context]: agent.task_type === "translate"
-        ? "translate · input: text ≤ 8k chars · output: translated text"
-        : "summarize · input: text ≤ 8k chars · output: up to 5 bullets",
+      [ENS_KEYS.context]:
+        agent.task_type === "custom"
+          ? "custom · input: task text ≤ 8k chars · output: answer text · runs on 0G"
+          : agent.task_type === "translate"
+            ? "translate · input: text ≤ 8k chars · output: translated text"
+            : "summarize · input: text ≤ 8k chars · output: up to 5 bullets",
       [ENS_KEYS.basePrice]: base,
       [ENS_KEYS.price]: base,
       [ENS_KEYS.score]: "3.00",

@@ -3,6 +3,7 @@ import { Router, type Request, type Response } from "express";
 import { verifyMessage } from "viem";
 import { z } from "zod";
 import {
+  AGENT_TOOLS,
   formatUnits6,
   type ArenaState,
   type HireResponse,
@@ -35,7 +36,7 @@ import { AppError, badRequest, conflict, forbidden, notFound, unauthorized } fro
 import { emit, log, recentEvents, subscribe } from "./events";
 import { getBalances } from "./hedera";
 import { createRpContext, verifyWorldProof } from "./identity";
-import { brainStatus } from "./brain";
+import { brainStatus, testBrainKey } from "./brain";
 import { capabilitiesOf, getProofView, listProofViews, runDemoProof, runLiveProof, runSubcontract } from "./proofs";
 import { submitRating } from "./verifier";
 import { agentDetail, agentView, hireView, personView } from "./views";
@@ -109,9 +110,18 @@ async function meResponse(person: PersonRow | null): Promise<MeResponse> {
 const verifySchema = z.object({ handle: z.string(), proof: z.unknown() });
 const createAgentSchema = z.object({
   label: z.string().min(1),
-  taskType: z.enum(["summarize", "translate"]),
+  taskType: z.enum(["summarize", "translate", "custom"]),
   basePrice: z.string().min(1),
   description: z.string().max(200).optional(),
+  brain: z
+    .object({
+      provider: z.literal("0g"),
+      apiKey: z.string().min(1).max(300),
+      model: z.string().max(100).optional(),
+      systemPrompt: z.string().max(4000),
+      tools: z.array(z.enum(AGENT_TOOLS)).max(AGENT_TOOLS.length),
+    })
+    .optional(),
 });
 const hireSchema = z.object({
   agent: z.string().min(1),
@@ -354,6 +364,17 @@ export function createApi(): Router {
   r.post("/api/proofs/live", async (req, res) => {
     const body = z.object({ agent: z.string().max(32).optional() }).parse(req.body ?? {});
     res.json(await runLiveProof(body.agent));
+  });
+
+  r.post("/api/provider/brain/test", async (req, res) => {
+    requirePerson(req);
+    const body = z.object({ apiKey: z.string().min(1).max(300), model: z.string().max(100).optional() }).parse(req.body ?? {});
+    try {
+      const out = await testBrainKey(body.apiKey.trim(), body.model?.trim() || undefined);
+      res.json({ ok: true, model: out.model, requestId: out.requestId, models: out.models });
+    } catch (err) {
+      throw badRequest(`That key or model did not work: ${(err as Error).message}`, (err as { hint?: string }).hint);
+    }
   });
 
   r.get("/api/brain", async (_req, res) => {
