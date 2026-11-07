@@ -941,11 +941,16 @@ export function setProofParent(id: string, parentId: string): void {
 }
 
 // ---------- chain index cache (rebuildable from ENS and the HireLedger) ----------
+/** Old test agents (coderv2, coderv3…). Their ENS names stay on-chain and the index keeps finding them, so they're hidden here. */
+const RETIRED_CHAIN_AGENT = /^coderv\d+$/;
+
 export function listChainAgents(): ChainAgentRow[] {
-  return getDb().prepare("SELECT * FROM chain_agents ORDER BY label").all() as unknown as ChainAgentRow[];
+  const rows = getDb().prepare("SELECT * FROM chain_agents ORDER BY label").all() as unknown as ChainAgentRow[];
+  return rows.filter((row) => !RETIRED_CHAIN_AGENT.test(row.label));
 }
 export function getChainAgent(nameOrLabel: string): ChainAgentRow | undefined {
-  return getDb().prepare("SELECT * FROM chain_agents WHERE label = ? OR name = ?").get(nameOrLabel, nameOrLabel) as unknown as ChainAgentRow | undefined;
+  const row = getDb().prepare("SELECT * FROM chain_agents WHERE label = ? OR name = ?").get(nameOrLabel, nameOrLabel) as unknown as ChainAgentRow | undefined;
+  return row && !RETIRED_CHAIN_AGENT.test(row.label) ? row : undefined;
 }
 export function upsertChainAgent(r: ChainAgentRow): void {
   getDb()
