@@ -262,6 +262,12 @@ describe("image and video agents", () => {
     expect(trustMode(calls.find((c) => c.url.endsWith("/images/generations"))!)).toBeUndefined();
   });
 
+  it("keeps the raw answer when a provider shapes it differently, so the link isn't lost", async () => {
+    stubRouter(answer({ data: { image_urls: ["https://cdn.test/a.png"] } }));
+    const { text } = await think(media("image", "open"), { purpose: "image-gen", messages });
+    expect(text).toContain("https://cdn.test/a.png");
+  });
+
   it("gives media agents a standard key", async () => {
     process.env.ZG_MANAGEMENT_KEY = "mk-admin";
     const calls = stubRouter(() => new Response(JSON.stringify({ key: "sk-agent" })));
