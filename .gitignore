@@ -26,3 +26,6 @@ reports/
 
 # pnpm store
 .pnpm-store/
+
+# Presentation screenshots
+screenshots/
