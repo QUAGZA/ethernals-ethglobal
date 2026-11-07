@@ -385,7 +385,7 @@ function mediaPayload(type: ModelType, model: string, messages: Record<string, u
 function mediaText(type: ModelType, body: unknown): string {
   const b = body as Record<string, any>;
   if (type === "image") {
-    const items = (b.data ?? []) as { url?: string; b64_json?: string }[];
+    const items = (Array.isArray(b.data) ? b.data : []) as { url?: string; b64_json?: string }[];
     return items.map((d) => d.url ?? (d.b64_json ? `data:image/png;base64,${d.b64_json}` : "")).filter(Boolean).join("\n") || JSON.stringify(b);
   }
   if (type === "embedding") {

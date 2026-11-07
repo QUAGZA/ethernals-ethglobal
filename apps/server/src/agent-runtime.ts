@@ -153,20 +153,19 @@ async function runTask(
   if (seller.task_type === "image-gen" || seller.task_type === "video-gen") {
     return { result: await generate(body.input, seller, seller.task_type), subHire: null };
   }
-  if (body.consent.maxAssistants > 0) {
-    // Imported lazily to avoid a cycle (assistants -> buyer -> agent-runtime).
-    const { isTextAgent, runWithAssistants } = await import("./assistants");
-    if (isTextAgent(seller)) {
-      const run = await runWithAssistants({ seller, hireId, mandateId: mandate.id, input: body.input, maxAssistants: body.consent.maxAssistants });
-      const own = run.result ?? (await ownWork(seller, body));
-      const result = run.result ? own : [own, ...run.notes].join("\n\n---\n");
-      return { result, subHire: null, assistants: run.assistants };
-    }
+  // Imported lazily to avoid a cycle (assistants -> buyer -> agent-runtime).
+  const { isTextAgent, marketplaceNote, runWithAssistants } = await import("./assistants");
+  if (body.consent.maxAssistants > 0 && isTextAgent(seller)) {
+    const run = await runWithAssistants({ seller, hireId, mandateId: mandate.id, input: body.input, maxAssistants: body.consent.maxAssistants });
+    const own = run.result ?? (await ownWork(seller, body));
+    const result = run.result ? own : [own, ...run.notes].join("\n\n---\n");
+    return { result, subHire: null, assistants: run.assistants };
   }
+  const context = isTextAgent(seller) ? marketplaceNote(seller) : "";
   if (seller.task_type === "translate") {
-    return { result: await translate(body.input, body.translateTo ?? "hi", seller), subHire: null };
+    return { result: await translate(body.input, body.translateTo ?? "hi", seller, context), subHire: null };
   }
-  const summary = await summarize(body.input, seller);
+  const summary = await summarize(body.input, seller, context);
   if (!body.translateTo) return { result: summary, subHire: null };
 
   // Deterministic sub-hire trigger (PRD SUB-2): "also translate" sends the summary to a translate agent.

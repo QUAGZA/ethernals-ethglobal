@@ -12,6 +12,7 @@ import { ExactHederaScheme as HederaServerScheme } from "@x402/hedera/exact/serv
 import { config } from "./config";
 import { getAgentByLabel, type AgentRow } from "./db";
 import { assetAmountToUnits, paymentAssetId, parseEcdsaKey, unitsToAssetAmount } from "./hedera";
+import { log } from "./events";
 import { getPrice } from "./ledger";
 
 const NETWORK = config.hedera.caip2;
@@ -29,21 +30,27 @@ function sellerFromPath(path: string): AgentRow {
 }
 
 const priceCache = new Map<string, { units: bigint; at: number }>();
+const PRICE_TTL_MS = 2000;
+/** One hire quotes the same agent several times, so an outage shouldn't be rediscovered on every quote. */
+const OUTAGE_TTL_MS = 30_000;
 
-/** Current price in 6-decimal units: from the HireLedger (cached 2 s), falling back to the base price. */
+/** Current price in 6-decimal units: from the HireLedger (cached 2 s), falling back to the last known price, then the base price. */
 export async function quoteUnits(agent: AgentRow): Promise<bigint> {
   const cached = priceCache.get(agent.key);
-  if (cached && Date.now() - cached.at < 2000) return cached.units;
+  if (cached && Date.now() < cached.at) return cached.units;
   let units = BigInt(agent.base_price);
+  let ttl = PRICE_TTL_MS;
   if (config.hedera.ledgerAddressOrNull() && agent.ledger_registered) {
     try {
       const onchain = await getPrice(agent.key as `0x${string}`);
       if (onchain > 0n) units = onchain;
-    } catch {
-      /* ledger unreachable: fall back to base price */
+    } catch (err) {
+      units = cached?.units ?? units;
+      ttl = OUTAGE_TTL_MS;
+      log.warn("Hedera RPC unavailable, using the last known price", { agent: agent.ens_name, units: units.toString(), error: (err as Error).message.split("\n")[0] });
     }
   }
-  priceCache.set(agent.key, { units, at: Date.now() });
+  priceCache.set(agent.key, { units, at: Date.now() + ttl });
   return units;
 }
 

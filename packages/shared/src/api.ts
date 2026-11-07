@@ -208,6 +208,18 @@ export interface SubHireOutcome {
   /** Assistants only: USDC paid over x402. */
   amount?: string;
   paymentUrl?: string | null;
+  /** Assistants only: images it made, as links or embedded data. Only ever filled from an image agent's own output. */
+  images?: string[];
+}
+
+const IMAGE_SOURCE = /data:image\/[^\s"'()<>]+|https?:\/\/[^\s"'()<>]+/g;
+
+/**
+ * The images in an image agent's output, whatever way it wrapped them. Never run this on a text agent's answer: a poisoned
+ * document could make the model write a link carrying the hirer's data, and showing it as an image would send that data out.
+ */
+export function extractImages(output: string): string[] {
+  return [...new Set(output.match(IMAGE_SOURCE) ?? [])];
 }
 
 export interface HireResponse {

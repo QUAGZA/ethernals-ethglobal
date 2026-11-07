@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useRef, useState, type FormEvent } from "react";
-import type { AgentDetail, EventMessage, HireResponse, HireView } from "@ethernals/shared";
-import { parseUnits6 } from "@ethernals/shared";
+import type { AgentDetail, EventMessage, HireResponse, HireView, SubHireOutcome } from "@ethernals/shared";
+import { extractImages, parseUnits6 } from "@ethernals/shared";
 import { api, toApiError, type ApiRequestError } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
 import { shortUsdc, usdc2 } from "@/lib/format";
@@ -11,6 +11,7 @@ import { useInterval } from "@/lib/hooks";
 import { useEvents } from "@/lib/use-events";
 import { ErrorNotice } from "./error-notice";
 import { ExtLink, LedgerLink, PaymentLink } from "./ext-link";
+import { GeneratedImages } from "./generated-images";
 import { NameraStep } from "./namera-step";
 import { ProgressNote, type ProgressStep } from "./progress-note";
 import { ReasonBadge } from "./reason-badge";
@@ -44,22 +45,22 @@ const fieldClass = "block w-full border-b border-ink bg-transparent py-3 outline
 const MAX_ASSISTANTS = 3;
 const SERVER_LIMIT_USDC = "1.00";
 
-const isImage = (line: string) => /^(data:image\/|https:\/\/)/.test(line);
-
-/** Image agents answer with one image per line: a link or embedded data. Anything else is shown as text. */
-function ResultBody({ agent, result }: { agent: AgentDetail; result: string }) {
-  const lines = result.split("\n").filter(Boolean);
-  if (agent.taskType === "image-gen" && lines.length > 0 && lines.every(isImage)) {
-    return (
-      <div className="flex flex-col gap-3">
-        {lines.map((src, i) => (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img key={i} src={src} alt={`Generated result ${i + 1}`} className="max-h-[420px] w-full border border-line object-contain" />
-        ))}
-      </div>
-    );
-  }
-  return <div className="max-h-[340px] overflow-y-auto border border-line bg-white/70 px-4 py-3 text-[13px] leading-[1.6] whitespace-pre-wrap">{result}</div>;
+/** The answer, then any images: an image agent's own, or those its assistants made. Text agents' links stay plain text. */
+function ResultBody({ agent, result, assistants }: { agent: AgentDetail; result: string; assistants?: SubHireOutcome[] }) {
+  const own = agent.taskType === "image-gen" ? extractImages(result) : [];
+  const fromAssistants = assistants?.filter((a) => a.images?.length) ?? [];
+  return (
+    <>
+      {own.length > 0 ? (
+        <GeneratedImages sources={own} />
+      ) : (
+        <div className="max-h-[340px] overflow-y-auto border border-line bg-white/70 px-4 py-3 text-[13px] leading-[1.6] whitespace-pre-wrap">{result}</div>
+      )}
+      {fromAssistants.map((a, i) => (
+        <GeneratedImages key={a.hireId ?? i} sources={a.images!} caption={`Made by ${a.agentEnsName}`} />
+      ))}
+    </>
+  );
 }
 
 /** Code gen agents work on a posted task with hidden tests, so they have no free-text form. */
@@ -377,7 +378,7 @@ export function HirePanel({
                   <span>
                     Let this agent hire assistants
                     <span className="block text-[11px] opacity-60">
-                      It can recruit text agents from the marketplace, paying each one over x402 on Hedera from its own account.
+                      It can recruit text and image agents from the marketplace, paying each one over x402 on Hedera from its own account.
                     </span>
                   </span>
                 </label>
@@ -507,7 +508,7 @@ export function HirePanel({
                 <PaymentLink href={result.paymentUrl} />
                 {!result.paymentUrl && <span className="text-[11px] opacity-60">payment id pending</span>}
               </p>
-              <ResultBody agent={agent} result={result.result} />
+              <ResultBody agent={agent} result={result.result} assistants={result.assistants} />
               <SubHireOutcomeView subHire={result.subHire} />
               {result.assistants?.map((assistant, i) => (
                 <SubHireOutcomeView key={assistant.hireId ?? i} subHire={assistant} />
