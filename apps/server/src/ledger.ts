@@ -21,6 +21,8 @@ import { Batcher, SerialQueue } from "./queue";
 const chain = { ...hederaTestnet, rpcUrls: { default: { http: [config.hedera.rpcUrl] } } };
 
 export const hederaPublic = createPublicClient({ chain, transport: http(config.hedera.rpcUrl, { timeout: 60_000 }) });
+/** For reads a waiting hire depends on and can do without. A retried read costs 3 minutes when the RPC is down. */
+const hederaQuick = createPublicClient({ chain, transport: http(config.hedera.rpcUrl, { timeout: 5_000, retryCount: 0 }) });
 
 function wallet() {
   const account = privateKeyToAccount(operatorEvmKey());
@@ -160,5 +162,5 @@ export async function getStats(agentKey: Hex): Promise<LedgerStats> {
 }
 
 export async function getPrice(agentKey: Hex): Promise<bigint> {
-  return hederaPublic.readContract({ address: ledgerAddress(), abi: hireLedgerAbi, functionName: "priceOf", args: [agentKey] });
+  return hederaQuick.readContract({ address: ledgerAddress(), abi: hireLedgerAbi, functionName: "priceOf", args: [agentKey] });
 }
