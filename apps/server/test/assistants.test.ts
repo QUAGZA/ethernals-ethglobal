@@ -10,7 +10,7 @@ const discover = vi.hoisted(() => vi.fn());
 vi.mock("../src/buyer", async (original) => ({ ...(await original<object>()), hireAsAgent, discover }));
 
 const { assistantRoster, checkAssistantBudget, isTextAgent, marketplaceNote, MAX_DIRECT_ASSISTANT_BUDGET_USDC, runWithAssistants } = await import("../src/assistants");
-const { getMandate, insertMandate, listSpendEvents, upsertBrain, upsertChainAgent, upsertSpendAccount } = await import("../src/db");
+const { getChainAgent, getMandate, insertMandate, listChainAgents, listSpendEvents, upsertBrain, upsertChainAgent, upsertSpendAccount } = await import("../src/db");
 const { encryptSecret } = await import("../src/crypto");
 const { setNameraFactoryForTests } = await import("../src/spend");
 const { agent, person } = await import("./_fixtures");
@@ -56,6 +56,17 @@ describe("which agents qualify", () => {
     expect(roster).not.toContain(seller.ens_name);
     expect(roster).not.toContain(coder.ens_name);
     expect(roster).not.toContain(imager.ens_name);
+  });
+
+  it("hides the retired coderv agents and keeps coder", () => {
+    const row = (label: string) => ({ name: `${label}.ethernals-test.eth`, label, key: `0x${label.padEnd(64, "0")}`, description: "", endpoint: null, provider: null, task_type: "code-fix", brain: null, hedera_account: null, status: "offline", records_at: new Date().toISOString(), checked_at: new Date().toISOString() });
+    ["coder", "coderv2", "coderv15", "coderville"].forEach((label) => upsertChainAgent(row(label) as never));
+    const labels = listChainAgents().map((r) => r.label);
+    expect(labels).toEqual(expect.arrayContaining(["coder", "coderville"]));
+    expect(labels).not.toContain("coderv2");
+    expect(labels).not.toContain("coderv15");
+    expect(getChainAgent("coderv2")).toBeUndefined();
+    expect(getChainAgent("coder.ethernals-test.eth")?.label).toBe("coder");
   });
 
   it("skips on-chain agents whose endpoint doesn't answer", async () => {
